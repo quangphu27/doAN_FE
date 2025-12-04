@@ -1,0 +1,35 @@
+const express = require('express');
+const { authenticate, authorize } = require('../../middleware/auth');
+const {
+	listClasses,
+	getClassById,
+	createClass,
+	updateClass,
+	deleteClass,
+	addTeacher,
+	addStudent,
+	removeStudent,
+	getClassProgress,
+	getStudentProgress,
+	createLessonInClass,
+	createGameInClass
+} = require('../../controllers/classController');
+const router = express.Router();
+
+router.use(authenticate);
+
+router.get('/', authorize(['admin', 'giaoVien']), listClasses);
+router.get('/:id', authorize(['admin', 'giaoVien']), getClassById);
+router.post('/', authorize(['admin']), createClass);
+router.put('/:id', authorize(['admin', 'giaoVien']), updateClass);
+router.delete('/:id', authorize(['admin', 'giaoVien']), deleteClass);
+router.post('/:id/teacher', authorize(['admin']), addTeacher);
+router.post('/:id/students', authorize(['admin', 'giaoVien']), addStudent);
+router.delete('/:id/students/:studentId', authorize(['admin', 'giaoVien']), removeStudent);
+router.get('/:id/progress', authorize(['admin', 'giaoVien']), getClassProgress);
+router.get('/:id/students/:studentId/progress', authorize(['admin', 'giaoVien']), getStudentProgress);
+router.post('/:id/lessons', authorize(['admin', 'giaoVien']), createLessonInClass);
+router.post('/:id/games', authorize(['admin', 'giaoVien']), createGameInClass);
+
+module.exports = router;
+

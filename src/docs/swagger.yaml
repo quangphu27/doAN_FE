@@ -1,0 +1,539 @@
+openapi: 3.0.0
+info:
+  title: ${SWAGGER_TITLE}
+  version: ${SWAGGER_VERSION}
+servers:
+  - url: /api
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    IdParam:
+      type: string
+      example: 665f1b2c9c3b9b7a3c1e2d4f
+    BasicResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+    AuthTokens:
+      type: object
+      properties:
+        token:
+          type: string
+        refreshToken:
+          type: string
+    User:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdParam'
+        name:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum: [admin, parent, child]
+    Child:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdParam'
+        name:
+          type: string
+        birthdate:
+          type: string
+          format: date-time
+        classroom:
+          type: string
+        parent:
+          $ref: '#/components/schemas/IdParam'
+        progress:
+          type: object
+          properties:
+            lettersCompleted:
+              type: integer
+            numbersCompleted:
+              type: integer
+            colorsCompleted:
+              type: integer
+            actionsCompleted:
+              type: integer
+            games:
+              type: array
+              items:
+                type: object
+                properties:
+                  gameKey:
+                    type: string
+                  score:
+                    type: number
+                  completedAt:
+                    type: string
+                    format: date-time
+    Lesson:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdParam'
+        category:
+          type: string
+          enum: [letter, number, color, action]
+        title:
+          type: string
+        imageUrl:
+          type: string
+        content:
+          type: string
+        order:
+          type: integer
+    Game:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdParam'
+        key:
+          type: string
+        type:
+          type: string
+          enum: [puzzle, coloring, matching]
+        title:
+          type: string
+        data:
+          type: object
+        imageUrl:
+          type: string
+security:
+  - bearerAuth: []
+paths:
+  /auth/register:
+    post:
+      summary: Register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password]
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                password:
+                  type: string
+                role:
+                  type: string
+                  enum: [parent, child]
+      responses:
+        '201':
+          description: Created
+  /auth/login:
+    post:
+      summary: Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      token:
+                        type: string
+                      refreshToken:
+                        type: string
+                      user:
+                        $ref: '#/components/schemas/User'
+  /auth/logout:
+    post:
+      summary: Logout
+      responses:
+        '200':
+          description: OK
+  /auth/refresh:
+    post:
+      summary: Refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        '200':
+          description: OK
+  /auth/forgot-password:
+    post:
+      summary: Forgot password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+      responses:
+        '200':
+          description: OK
+  /auth/reset-password:
+    post:
+      summary: Reset password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, newPassword]
+              properties:
+                email:
+                  type: string
+                newPassword:
+                  type: string
+      responses:
+        '200':
+          description: OK
+  /users/me:
+    get:
+      summary: Get my profile
+      responses:
+        '200':
+          description: OK
+    put:
+      summary: Update my profile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                profile:
+                  type: object
+                  properties:
+                    avatarUrl:
+                      type: string
+                    phone:
+                      type: string
+                    address:
+                      type: string
+      responses:
+        '200':
+          description: OK
+  /users/password:
+    put:
+      summary: Change password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword:
+                  type: string
+                newPassword:
+                  type: string
+      responses:
+        '200':
+          description: OK
+  /children:
+    get:
+      summary: List children for parent
+      responses:
+        '200':
+          description: OK
+    post:
+      summary: Create child
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                birthdate:
+                  type: string
+                classroom:
+                  type: string
+      responses:
+        '201':
+          description: Created
+  /children/{id}:
+    put:
+      summary: Update child
+      parameters:
+        - in: path
+          name: id
+          schema:
+            $ref: '#/components/schemas/IdParam'
+          required: true
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                birthdate:
+                  type: string
+                classroom:
+                  type: string
+      responses:
+        '200':
+          description: OK
+    delete:
+      summary: Delete child
+      parameters:
+        - in: path
+          name: id
+          schema:
+            $ref: '#/components/schemas/IdParam'
+          required: true
+      responses:
+        '200':
+          description: OK
+  /children/{id}/progress:
+    get:
+      summary: Get child progress
+      parameters:
+        - in: path
+          name: id
+          schema:
+            $ref: '#/components/schemas/IdParam'
+          required: true
+      responses:
+        '200':
+          description: OK
+  /lessons:
+    get:
+      summary: List lessons
+      responses:
+        '200':
+          description: OK
+    post:
+      summary: Create lesson (admin)
+      responses:
+        '201':
+          description: Created
+  /lessons/{id}:
+    get:
+      summary: Get lesson by id
+      parameters:
+        - in: path
+          name: id
+          schema:
+            $ref: '#/components/schemas/IdParam'
+          required: true
+      responses:
+        '200':
+          description: OK
+    put:
+      summary: Update lesson (admin)
+      parameters:
+        - in: path
+          name: id
+          schema:
+            $ref: '#/components/schemas/IdParam'
+          required: true
+      responses:
+        '200':
+          description: OK
+    delete:
+      summary: Delete lesson (admin)
+      parameters:
+        - in: path
+          name: id
+          schema:
+            $ref: '#/components/schemas/IdParam'
+          required: true
+      responses:
+        '200':
+          description: OK
+  /lessons/{id}/complete:
+    post:
+      summary: Complete a lesson
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [childId]
+              properties:
+                childId:
+                  $ref: '#/components/schemas/IdParam'
+      responses:
+        '201':
+          description: Created
+  /games:
+    get:
+      summary: List games
+      responses:
+        '200':
+          description: OK
+    post:
+      summary: Create game (admin)
+      responses:
+        '201':
+          description: Created
+  /games/{id}:
+    get:
+      summary: Get game by id
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdParam'
+      responses:
+        '200':
+          description: OK
+  /games/play:
+    post:
+      summary: Play a game and save result
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [childId, gameKey, score]
+              properties:
+                childId:
+                  $ref: '#/components/schemas/IdParam'
+                gameKey:
+                  type: string
+                score:
+                  type: number
+      responses:
+        '201':
+          description: Created
+  /reports/overview:
+    get:
+      summary: Overview report
+      responses:
+        '200':
+          description: OK
+  /reports/time:
+    get:
+      summary: Time-based stats
+      responses:
+        '200':
+          description: OK
+  /reports/child/{id}:
+    get:
+      summary: Child detail report
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdParam'
+      responses:
+        '200':
+          description: OK
+  /reports/lessons:
+    get:
+      summary: Lessons progress stats
+      responses:
+        '200':
+          description: OK
+  /reports/games:
+    get:
+      summary: Games results stats
+      responses:
+        '200':
+          description: OK
+  /notifications:
+    get:
+      summary: List notifications and schedules
+      responses:
+        '200':
+          description: OK
+  /notifications/schedule:
+    post:
+      summary: Create schedule
+      responses:
+        '201':
+          description: Created
+  /notifications/{id}:
+    delete:
+      summary: Delete schedule
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdParam'
+      responses:
+        '200':
+          description: OK
+  /admin/stats:
+    get:
+      summary: Admin stats
+      responses:
+        '200':
+          description: OK
+  /admin/users:
+    get:
+      summary: Admin list users
+      responses:
+        '200':
+          description: OK
+  /admin/children:
+    get:
+      summary: Admin list children
+      responses:
+        '200':
+          description: OK
+  /admin/reports:
+    get:
+      summary: Admin system reports
+      responses:
+        '200':
+          description: OK
