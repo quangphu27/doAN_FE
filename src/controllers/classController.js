@@ -443,6 +443,65 @@ const createLessonInClass = async (req, res, next) => {
 	}
 };
 
+const updateLessonInClass = async (req, res, next) => {
+	try {
+		const Joi = require('joi');
+		const classId = req.params.id;
+		const lessonId = req.params.lessonId;
+		
+		const classData = await Class.findById(classId);
+		if (!classData) {
+			return res.status(404).json({ success: false, message: 'Không tìm thấy lớp' });
+		}
+
+		const userId = req.user.id || req.user._id;
+		if (req.user.vaiTro === 'giaoVien' && classData.giaoVien.toString() !== userId.toString()) {
+			return res.status(403).json({ success: false, message: 'Bạn không có quyền cập nhật bài học trong lớp này' });
+		}
+
+		// Kiểm tra bài học có thuộc lớp này không
+		if (!classData.baiTap.includes(lessonId)) {
+			return res.status(403).json({ success: false, message: 'Bài học không thuộc lớp này' });
+		}
+
+		// Validate dữ liệu
+		const schema = Joi.object({ 
+			tieuDe: Joi.string(), 
+			moTa: Joi.string().optional(),
+			danhMuc: Joi.string().valid('chuCai', 'so', 'mauSac', 'hanhDong').optional(),
+			capDo: Joi.string().valid('coBan', 'trungBinh', 'nangCao').optional(),
+			anhDaiDien: Joi.string().optional(), 
+			thoiGianUocTinh: Joi.number().optional(),
+			noiDung: Joi.any(), 
+			thuTu: Joi.number() 
+		});
+		const value = await schema.validateAsync(req.body);
+		
+		// Xử lý đáp án đúng cho trắc nghiệm
+		if (value.noiDung && value.noiDung.baiTap) {
+			value.noiDung.baiTap.forEach(exercise => {
+				if (exercise.loai === 'tracNghiem' && exercise.phuongAn && exercise.dapAnDung) {
+					if (typeof exercise.dapAnDung === 'string' && exercise.dapAnDung.length === 1) {
+						const letterIndex = exercise.dapAnDung.charCodeAt(0) - 65; 
+						if (letterIndex >= 0 && letterIndex < exercise.phuongAn.length) {
+							exercise.dapAnDung = letterIndex;
+						}
+					}
+				}
+			});
+		}
+		
+		const lesson = await Lesson.findByIdAndUpdate(lessonId, value, { new: true });
+		if (!lesson) {
+			return res.status(404).json({ success: false, message: 'Không tìm thấy bài học' });
+		}
+		
+		res.json({ success: true, data: lesson });
+	} catch (e) {
+		next(e);
+	}
+};
+
 const createGameInClass = async (req, res, next) => {
 	try {
 		const classId = req.params.id;
@@ -476,6 +535,7 @@ module.exports = {
 	getClassProgress,
 	getStudentProgress,
 	createLessonInClass,
+	updateLessonInClass,
 	createGameInClass
 };
 

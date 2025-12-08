@@ -12,6 +12,7 @@ const {
 	getClassProgress,
 	getStudentProgress,
 	createLessonInClass,
+	updateLessonInClass,
 	createGameInClass
 } = require('../../controllers/classController');
 const router = express.Router();
@@ -29,6 +30,7 @@ router.delete('/:id/students/:studentId', authorize(['admin', 'giaoVien']), remo
 router.get('/:id/progress', authorize(['admin', 'giaoVien']), getClassProgress);
 router.get('/:id/students/:studentId/progress', authorize(['admin', 'giaoVien']), getStudentProgress);
 router.post('/:id/lessons', authorize(['admin', 'giaoVien']), createLessonInClass);
+router.put('/:id/lessons/:lessonId', authorize(['admin', 'giaoVien']), updateLessonInClass);
 router.post('/:id/games', authorize(['admin', 'giaoVien']), createGameInClass);
 
 module.exports = router;
