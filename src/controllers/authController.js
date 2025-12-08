@@ -41,7 +41,6 @@ const register = async (req, res, next) => {
 		const user = await User.create(value);
 		const token = signToken(user);
 		const refreshToken = signRefreshToken(user);
-		const trialStatus = user.getTrialStatus();
 		const userObj = user.toObject();
 		userObj.id = userObj._id;
 		delete userObj.matKhau;
@@ -50,8 +49,7 @@ const register = async (req, res, next) => {
 			data: { 
 				token, 
 				refreshToken, 
-				user: userObj,
-				trialStatus: trialStatus
+				user: userObj
 			} 
 		});
 	} catch (err) {
@@ -81,23 +79,11 @@ const login = async (req, res, next) => {
 		const ok = await user.comparePassword(matKhau);
 		if (!ok) return res.status(400).json({ success: false, message: 'Sai thông tin đăng nhập' });
 		
-		if (user.vaiTro !== 'admin' && user.taiKhoanDungThu && !user.daKichHoat) {
-			const trialStatus = user.getTrialStatus();
-			if (!trialStatus.isValid) {
-				return res.status(403).json({ 
-					success: false, 
-					message: 'Tài khoản dùng thử đã hết hạn. Vui lòng liên hệ admin để kích hoạt tài khoản.',
-					trialStatus: trialStatus
-				});
-			}
-		}
-		
 		user.dangNhapCuoi = new Date();
 		await user.save();
 		
 		const token = signToken(user);
 		const refreshToken = signRefreshToken(user);
-		const trialStatus = user.getTrialStatus();
 		const userObj = user.toObject();
 		userObj.id = userObj._id;
 		delete userObj.matKhau;
@@ -107,8 +93,7 @@ const login = async (req, res, next) => {
 			data: { 
 				token, 
 				refreshToken, 
-				user: userObj,
-				trialStatus: trialStatus
+				user: userObj
 			} 
 		});
 	} catch (err) {
@@ -441,10 +426,8 @@ const changePassword = async (req, res, next) => {
 const getProfile = async (req, res, next) => {
 	try {
 		const user = await User.findById(req.user.id);
-		const trialStatus = user.getTrialStatus();
 		const userObj = user.toObject();
 		userObj.id = userObj._id;
-		userObj.trialStatus = trialStatus;
 		delete userObj.matKhau;
 		res.json({ success: true, data: { user: userObj } });
 	} catch (err) {

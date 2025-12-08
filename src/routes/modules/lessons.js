@@ -1,6 +1,6 @@
 const express = require('express');
 const { authenticate, authorize } = require('../../middleware/auth');
-const { listLessons, getLessonById, getRandomExercises, completeLesson, createLesson, updateLesson, deleteLesson, getLessonsByCategory, getRecommendedLessons, searchLessons, checkLessonCompletion, getLessonHistory } = require('../../controllers/lessonController');
+const { listLessons, getLessonById, getRandomExercises, completeLesson, createLesson, updateLesson, deleteLesson, getLessonsByCategory, getRecommendedLessons, searchLessons, checkLessonCompletion, getLessonHistory, getLessonResults } = require('../../controllers/lessonController');
 const router = express.Router();
 router.get('/', authenticate, listLessons);
 router.get('/search', searchLessons);
@@ -12,6 +12,7 @@ router.post('/:id/complete', authorize(['parent','admin']), completeLesson);
 router.get('/child/:childId/recommended', authorize(['parent','admin']), getRecommendedLessons);
 router.get('/:id/completion/:childId', authenticate, checkLessonCompletion);
 router.get('/child/:childId/history', authenticate, getLessonHistory);
+router.get('/:lessonId/results', authenticate, authorize(['admin', 'giaoVien']), getLessonResults);
 router.post('/', authenticate, authorize(['admin', 'giaoVien']), createLesson);
 router.put('/:id', authorize(['admin']), updateLesson);
 router.delete('/:id', authorize(['admin']), deleteLesson);

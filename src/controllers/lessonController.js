@@ -472,6 +472,158 @@ const getLessonHistory = async (req, res, next) => {
 	}
 };
 
+const getLessonResults = async (req, res, next) => {
+	try {
+		const { lessonId } = req.params;
+		const Class = require('../models/Lop');
+		const Progress = require('../models/TienDo');
+		
+		const lesson = await Lesson.findById(lessonId).populate('lop', 'tenLop maLop');
+		if (!lesson) {
+			return res.status(404).json({ success: false, message: 'Không tìm thấy bài học' });
+		}
+		
+		if (req.user.vaiTro === 'giaoVien') {
+			const teacherClasses = await Class.find({ giaoVien: req.user.id || req.user._id });
+			const teacherClassIds = teacherClasses.map(c => c._id.toString());
+			const lessonClassIds = (lesson.lop || []).map(c => c._id.toString());
+			const hasAccess = lessonClassIds.some(id => teacherClassIds.includes(id));
+			
+			if (!hasAccess && lesson.nguoiTao?.toString() !== (req.user.id || req.user._id)?.toString()) {
+				return res.status(403).json({ success: false, message: 'Bạn không có quyền xem kết quả bài học này' });
+			}
+		}
+		
+		const classIds = (lesson.lop || []).map(c => {
+			if (typeof c === 'object' && c._id) return c._id;
+			return c;
+		});
+		const allStudents = [];
+		
+		for (const classId of classIds) {
+			const classData = await Class.findById(classId).populate('hocSinh', 'hoTen ngaySinh gioiTinh anhDaiDien');
+			if (classData && classData.hocSinh && classData.hocSinh.length > 0) {
+				allStudents.push(...classData.hocSinh.map(student => ({
+					studentId: student._id,
+					studentName: student.hoTen,
+					studentAvatar: student.anhDaiDien,
+					classId: classId,
+					className: classData.tenLop
+				})));
+			}
+		}
+		
+		const studentIds = allStudents.map(s => s.studentId);
+		const submittedProgress = await Progress.find({
+			baiHoc: lessonId,
+			treEm: { $in: studentIds },
+			trangThai: 'hoanThanh',
+			loai: 'baiHoc'
+		}).populate('treEm', 'hoTen ngaySinh gioiTinh anhDaiDien');
+		
+		const submittedStudentIds = new Set(submittedProgress.map(p => p.treEm._id.toString()));
+		
+		const submittedStudents = allStudents
+			.filter(s => submittedStudentIds.has(s.studentId.toString()))
+			.map(student => {
+				const progress = submittedProgress.find(p => p.treEm._id.toString() === student.studentId.toString());
+				return {
+					studentId: student.studentId,
+					studentName: student.studentName,
+					studentAvatar: student.studentAvatar,
+					classId: student.classId,
+					className: student.className,
+					score: progress.diemSo || 0,
+					timeSpent: progress.thoiGianDaDung || 0,
+					completedAt: progress.ngayHoanThanh || progress.updatedAt,
+					attempts: progress.soLanThu || 1,
+					answers: (progress.cauTraLoi || []).map(answer => ({
+						exerciseId: answer.idBaiTap,
+						answer: answer.cauTraLoi,
+						isCorrect: answer.dung
+					}))
+				};
+			});
+		
+		const notSubmittedStudents = allStudents.filter(s => !submittedStudentIds.has(s.studentId.toString()));
+		
+		const exercises = (lesson.noiDung?.baiTap || []).map(ex => ({
+			id: ex._id || ex.id,
+			question: ex.cauHoi,
+			type: ex.loai,
+			options: ex.phuongAn || [],
+			correctAnswer: ex.dapAnDung,
+			image: ex.anhDaiDien,
+			vanBan: ex.vanBan
+		}));
+		
+		const submittedStudentsWithDetails = submittedStudents.map(student => {
+			const studentAnswers = student.answers || [];
+			const answersWithExerciseDetails = studentAnswers.map(answer => {
+				const exercise = exercises.find(ex => ex.id === answer.exerciseId);
+				return {
+					exerciseId: answer.exerciseId,
+					exerciseQuestion: exercise?.question || '',
+					exerciseType: exercise?.type || '',
+					exerciseOptions: exercise?.options || [],
+					correctAnswer: exercise?.correctAnswer,
+					studentAnswer: answer.answer,
+					isCorrect: answer.isCorrect
+				};
+			});
+			
+			return {
+				studentId: student.studentId,
+				studentName: student.studentName,
+				studentAvatar: student.studentAvatar,
+				classId: student.classId,
+				className: student.className,
+				score: student.score,
+				timeSpent: student.timeSpent,
+				completedAt: student.completedAt,
+				attempts: student.attempts,
+				answers: answersWithExerciseDetails
+			};
+		});
+		
+		const notSubmittedStudentsList = notSubmittedStudents.map(student => ({
+			studentId: student.studentId,
+			studentName: student.studentName,
+			studentAvatar: student.studentAvatar,
+			classId: student.classId,
+			className: student.className
+		}));
+		
+		res.json({
+			success: true,
+			data: {
+				lesson: {
+					id: lesson._id,
+					title: lesson.tieuDe,
+					description: lesson.moTa,
+					category: lesson.danhMuc,
+					level: lesson.capDo,
+					image: lesson.anhDaiDien,
+					classes: lesson.lop || []
+				},
+				exercises: exercises,
+				submittedStudents: submittedStudentsWithDetails,
+				notSubmittedStudents: notSubmittedStudentsList,
+				summary: {
+					totalStudents: allStudents.length,
+					submittedCount: submittedStudents.length,
+					notSubmittedCount: notSubmittedStudents.length,
+					averageScore: submittedStudents.length > 0
+						? Math.round(submittedStudents.reduce((sum, s) => sum + s.score, 0) / submittedStudents.length)
+						: 0
+				}
+			}
+		});
+	} catch (e) {
+		next(e);
+	}
+};
+
 module.exports = {
 	listLessons,
 	getLessonById,
@@ -484,5 +636,6 @@ module.exports = {
 	getRecommendedLessons,
 	searchLessons,
 	checkLessonCompletion,
-	getLessonHistory
+	getLessonHistory,
+	getLessonResults
 };

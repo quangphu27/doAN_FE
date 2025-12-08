@@ -27,7 +27,7 @@ router.post('/:id/play', authorize(['parent', 'child', 'admin']), playGame);
 
 router.post('/', authorize(['giaoVien']), createGame);
 router.put('/:id', authorize(['giaoVien']), updateGame);
-router.delete('/:id', authorize(['admin,giaovien']), deleteGame);
+router.delete('/:id', authorize(['admin', 'giaoVien']), deleteGame);
 router.post('/upload/puzzle', authorize(['giaoVien']), upload.single('image'), uploadPuzzleImage);
 router.post('/upload/guess', authorize(['giaoVien']), upload.single('image'), uploadGuessImage);
 router.post('/create/coloring', authorize(['admin']), upload.single('outlineImage'), createColoringGame);

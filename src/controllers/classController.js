@@ -523,6 +523,74 @@ const createGameInClass = async (req, res, next) => {
 	}
 };
 
+const getClassLessonsWithStats = async (req, res, next) => {
+	try {
+		const classId = req.params.id;
+		
+		const classData = await Class.findById(classId)
+			.populate('hocSinh', 'hoTen ngaySinh gioiTinh anhDaiDien')
+			.populate('baiTap', 'tieuDe danhMuc capDo moTa anhDaiDien');
+		
+		if (!classData) {
+			return res.status(404).json({ success: false, message: 'Không tìm thấy lớp' });
+		}
+		
+		const userId = req.user.id || req.user._id;
+		if (req.user.vaiTro === 'giaoVien' && classData.giaoVien.toString() !== userId.toString()) {
+			return res.status(403).json({ success: false, message: 'Bạn không có quyền xem kết quả lớp này' });
+		}
+		
+		const studentIds = classData.hocSinh.map(s => s._id);
+		const totalStudents = studentIds.length;
+		
+		const lessonsWithStats = await Promise.all(
+			(classData.baiTap || []).map(async (lesson) => {
+				const submittedProgress = await Progress.find({
+					baiHoc: lesson._id,
+					treEm: { $in: studentIds },
+					trangThai: 'hoanThanh',
+					loai: 'baiHoc'
+				});
+				
+				const submittedCount = submittedProgress.length;
+				const notSubmittedCount = totalStudents - submittedCount;
+				const averageScore = submittedCount > 0
+					? Math.round(submittedProgress.reduce((sum, p) => sum + (p.diemSo || 0), 0) / submittedCount)
+					: 0;
+				
+				return {
+					id: lesson._id,
+					title: lesson.tieuDe,
+					description: lesson.moTa,
+					category: lesson.danhMuc,
+					level: lesson.capDo,
+					image: lesson.anhDaiDien,
+					summary: {
+						totalStudents: totalStudents,
+						submittedCount: submittedCount,
+						notSubmittedCount: notSubmittedCount,
+						averageScore: averageScore
+					}
+				};
+			})
+		);
+		
+		res.json({
+			success: true,
+			data: {
+				class: {
+					id: classData._id,
+					tenLop: classData.tenLop,
+					moTa: classData.moTa
+				},
+				lessons: lessonsWithStats
+			}
+		});
+	} catch (e) {
+		next(e);
+	}
+};
+
 module.exports = {
 	listClasses,
 	getClassById,
@@ -536,6 +604,7 @@ module.exports = {
 	getStudentProgress,
 	createLessonInClass,
 	updateLessonInClass,
-	createGameInClass
+	createGameInClass,
+	getClassLessonsWithStats
 };
 

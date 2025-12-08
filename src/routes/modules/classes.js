@@ -13,7 +13,8 @@ const {
 	getStudentProgress,
 	createLessonInClass,
 	updateLessonInClass,
-	createGameInClass
+	createGameInClass,
+	getClassLessonsWithStats
 } = require('../../controllers/classController');
 const router = express.Router();
 
@@ -28,6 +29,7 @@ router.post('/:id/teacher', authorize(['admin']), addTeacher);
 router.post('/:id/students', authorize(['admin', 'giaoVien']), addStudent);
 router.delete('/:id/students/:studentId', authorize(['admin', 'giaoVien']), removeStudent);
 router.get('/:id/progress', authorize(['admin', 'giaoVien']), getClassProgress);
+router.get('/:id/lessons/stats', authorize(['admin', 'giaoVien']), getClassLessonsWithStats);
 router.get('/:id/students/:studentId/progress', authorize(['admin', 'giaoVien']), getStudentProgress);
 router.post('/:id/lessons', authorize(['admin', 'giaoVien']), createLessonInClass);
 router.put('/:id/lessons/:lessonId', authorize(['admin', 'giaoVien']), updateLessonInClass);

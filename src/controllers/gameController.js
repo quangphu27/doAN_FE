@@ -280,10 +280,23 @@ const updateGame = async (req, res, next) => {
 
 const deleteGame = async (req, res, next) => {
 	try {
-		const game = await Game.findByIdAndDelete(req.params.id);
+		const game = await Game.findById(req.params.id);
 		if (!game) {
 			return res.status(404).json({ success: false, message: 'Game not found' });
 		}
+		
+		if (req.user.vaiTro === 'giaoVien') {
+			const gameCreatorId = game.nguoiTao?.toString() || game.nguoiTao;
+			const userId = req.user.id?.toString() || req.user._id?.toString() || req.user.id;
+			if (gameCreatorId !== userId) {
+				return res.status(403).json({ 
+					success: false, 
+					message: 'Bạn chỉ có thể xóa game do chính mình tạo ra' 
+				});
+			}
+		}
+		
+		await Game.findByIdAndDelete(req.params.id);
 		res.json({ success: true, message: 'Game deleted successfully' });
 	} catch (e) {
 		next(e);
