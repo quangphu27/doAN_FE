@@ -15,7 +15,8 @@ const {
 	createMatchingGame,
 	createGuessingGame,
 	saveGameResult,
-	getGameHistory
+	getGameHistory,
+	getGameResults
 } = require('../../controllers/gameController');
 const router = express.Router();
 router.use(authenticate);
@@ -23,7 +24,11 @@ router.use(authenticate);
 router.get('/', listGames);
 router.get('/:id', getGameById);
 
-router.post('/:id/play', authorize(['parent', 'child', 'admin']), playGame);
+router.post(
+	'/:id/play', 
+	authorize(['parent', 'child', 'phuHuynh', 'hocSinh', 'admin']), 
+	playGame
+);
 
 router.post('/', authorize(['giaoVien']), createGame);
 router.put('/:id', authorize(['giaoVien']), updateGame);
@@ -34,7 +39,17 @@ router.post('/create/coloring', authorize(['admin']), upload.single('outlineImag
 router.post('/create/puzzle', authorize(['admin']), upload.single('originalImage'), createPuzzleGame);
 router.post('/create/matching', authorize(['admin']), createMatchingGame);
 router.post('/create/guessing', authorize(['admin']), upload.array('media', 20), createGuessingGame);
-router.post('/result', authorize(['parent', 'child', 'admin']), saveGameResult);
-router.get('/child/:childId/history', authorize(['parent', 'child', 'admin']), getGameHistory);
+router.post(
+	'/result', 
+	authorize(['parent', 'child', 'phuHuynh', 'hocSinh', 'admin']), 
+	upload.single('resultImage'), 
+	saveGameResult
+);
+router.get(
+	'/child/:childId/history', 
+	authorize(['parent', 'child', 'phuHuynh', 'hocSinh', 'admin']), 
+	getGameHistory
+);
+router.get('/:gameId/results', authorize(['admin', 'giaoVien']), getGameResults);
 
 module.exports = router;

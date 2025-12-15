@@ -15,6 +15,8 @@ const TienDoSchema = new mongoose.Schema(
 		soLanThu: { type: Number, default: 0 },
 		ngayHoanThanh: Date,
 		ghiChu: String,
+	tepKetQua: String,
+	duLieuKetQua: mongoose.Schema.Types.Mixed,
 		cauTraLoi: [{
 			idBaiTap: { type: String, required: true },
 			cauTraLoi: { type: String, required: true },

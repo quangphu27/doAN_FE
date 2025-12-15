@@ -12,10 +12,15 @@ const router = express.Router();
 router.use(authenticate);
 
 const canManageSession = (req, res, next) => {
-	if (req.user.vaiTro === 'hocSinh' && req.body.childId === req.user.id) {
+	const role = req.user.vaiTro;
+	const isChild = role === 'hocSinh' || role === 'child';
+	const isParent = role === 'phuHuynh' || role === 'parent';
+	const isAdmin = role === 'admin';
+
+	if (isChild && req.body.childId === req.user.id) {
 		return next();
 	}
-	if (req.user.vaiTro === 'phuHuynh' || req.user.vaiTro === 'admin') {
+	if (isParent || isAdmin) {
 		return next();
 	}
 	return res.status(403).json({ success: false, message: 'Unauthorized' });
@@ -24,9 +29,21 @@ const canManageSession = (req, res, next) => {
 router.post('/start', canManageSession, startSession);// Canmangesession (middleware chỉ ai có quyen child moi duoc vao)
 router.post('/end', canManageSession, endSession);
 
-router.get('/child/:childId', authorize(['phuHuynh', 'admin']), getChildSessions);
-router.get('/child/:childId/total-time', authorize(['phuHuynh', 'admin']), getTotalUsageTime);
-router.get('/child/:childId/last-activity', authorize(['phuHuynh', 'admin']), getLastActivityTime);
+router.get(
+	'/child/:childId', 
+	authorize(['phuHuynh', 'parent', 'admin']), 
+	getChildSessions
+);
+router.get(
+	'/child/:childId/total-time', 
+	authorize(['phuHuynh', 'parent', 'admin']), 
+	getTotalUsageTime
+);
+router.get(
+	'/child/:childId/last-activity', 
+	authorize(['phuHuynh', 'parent', 'admin']), 
+	getLastActivityTime
+);
 
 module.exports = router;
 

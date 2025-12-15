@@ -1,34 +1,42 @@
 const Joi = require('joi');
 const Lesson = require('../models/BaiHoc');
 const Child = require('../models/TreEm');
+const Progress = require('../models/TienDo');
 
 const listLessons = async (req, res, next) => {
 	try {
-		const { danhMuc, capDo, limit = 20, page = 1 } = req.query;
+		const { danhMuc, capDo, limit = 20, page = 1, childId } = req.query;
 		const filter = { trangThai: true };
 		if (danhMuc) filter.danhMuc = danhMuc;
 		if (capDo) filter.capDo = capDo;
 
-		if (req.user && req.user.vaiTro === 'hocSinh') {
-			const Class = require('../models/Lop');
+	let child = null;
 
-			// Tìm hồ sơ TreEm tương ứng với tài khoản học sinh
-			const child = await Child.findOne({ phuHuynh: req.user.id || req.user._id }).select('_id');
+	if (req.user && req.user.vaiTro === 'hocSinh') {
+		const Class = require('../models/Lop');
 
-			// Nếu học sinh chưa được tạo hồ sơ / chưa được thêm vào lớp nào → không có quyền xem bài học
+		console.log('[listLessons] user:', req.user?.id || req.user?._id, 'query childId:', childId);
+		child = await Child.findOne({
+			$or: [
+				{ phuHuynh: req.user.id || req.user._id },
+				{ _id: childId }
+			]
+		}).select('_id');
+		console.log('[listLessons] resolved child:', child?._id);
+
 			if (!child) {
-				return res.json({
-					success: true,
-					data: {
-						lessons: [],
-						pagination: {
-							total: 0,
-							page: parseInt(page),
-							limit: parseInt(limit),
-							pages: 0
-						}
+			return res.json({
+				success: true,
+				data: {
+					lessons: [],
+					pagination: {
+						total: 0,
+						page: parseInt(page),
+						limit: parseInt(limit),
+						pages: 0
 					}
-				});
+				}
+			});
 			}
 
 			// Lấy các lớp mà học sinh đang tham gia
@@ -36,6 +44,7 @@ const listLessons = async (req, res, next) => {
 			const lessonIds = Array.from(new Set(
 				classes.flatMap(c => (c.baiTap || []).map(id => id.toString()))
 			));
+			console.log('[listLessons] classes count:', classes.length, 'lessonIds:', lessonIds);
 
 			// Nếu lớp không có bài tập nào → trả về rỗng
 			if (lessonIds.length === 0) {
@@ -56,11 +65,29 @@ const listLessons = async (req, res, next) => {
 			filter._id = { $in: lessonIds };
 		}
 
-		const lessons = await Lesson.find(filter)
+		let lessons = await Lesson.find(filter)
 			.populate('lop', 'tenLop maLop')
 			.sort({ thuTu: 1 })
 			.limit(parseInt(limit))
 			.skip((parseInt(page) - 1) * parseInt(limit));
+
+		if (req.user && req.user.vaiTro === 'hocSinh' && lessons.length > 0 && child) {
+			const lessonIds = lessons.map(lesson => lesson._id);
+			try {
+				const doneLessons = await Progress.find({
+					treEm: child._id,
+					baiHoc: { $in: lessonIds },
+					loai: 'baiHoc',
+					trangThai: 'hoanThanh'
+				}).select('baiHoc');
+
+				const completedSet = new Set(doneLessons.map(p => p.baiHoc.toString()));
+				console.log('[listLessons] doneLessons:', doneLessons.map(d => d.baiHoc?.toString()));
+				lessons = lessons.filter(lesson => !completedSet.has(lesson._id.toString()));
+			} catch (progressErr) {
+				console.error('[listLessons] progress query error:', progressErr);
+			}
+		}
 		
 		const total = await Lesson.countDocuments(filter);
 		
@@ -77,6 +104,7 @@ const listLessons = async (req, res, next) => {
 			} 
 		});
 	} catch (e) {
+		console.error('[listLessons] error:', e);
 		next(e);
 	}
 };
@@ -423,11 +451,32 @@ const getLessonHistory = async (req, res, next) => {
 	try {
 		const { childId } = req.params;
 		const { limit = 20, page = 1 } = req.query;
+		let targetChildId = childId;
 		
 		const Progress = require('../models/TienDo');
+		const childDoc = await Child.findById(childId).select('_id');
+		if (!childDoc) {
+			const fallbackChild = await Child.findOne({ phuHuynh: childId }).select('_id');
+			if (fallbackChild) {
+				targetChildId = fallbackChild._id;
+			} else {
+				return res.json({
+					success: true,
+					data: {
+						history: [],
+						pagination: {
+							total: 0,
+							page: parseInt(page),
+							limit: parseInt(limit),
+							pages: 0
+						}
+					}
+				});
+			}
+		}
 		
 		const progress = await Progress.find({ 
-			treEm: childId, 
+			treEm: targetChildId, 
 			trangThai: 'hoanThanh',
 			loai: 'baiHoc'
 		})
@@ -437,7 +486,7 @@ const getLessonHistory = async (req, res, next) => {
 		.skip((parseInt(page) - 1) * parseInt(limit));
 		
 		const total = await Progress.countDocuments({ 
-			treEm: childId, 
+			treEm: targetChildId, 
 			trangThai: 'hoanThanh',
 			loai: 'baiHoc'
 		});
@@ -523,6 +572,34 @@ const getLessonResults = async (req, res, next) => {
 		
 		const submittedStudentIds = new Set(submittedProgress.map(p => p.treEm._id.toString()));
 		
+		const exerciseMap = new Map();
+		let exerciseCounter = 1;
+
+		const addExerciseToMap = (id, text, correct) => {
+			if (!id) return;
+			const key = id.toString();
+			const label = `Câu ${exerciseCounter}`;
+			exerciseMap.set(key, {
+				label,
+				text: text || label,
+				correctAnswer: correct
+			});
+			exerciseCounter += 1;
+		};
+
+		const exercises = (lesson.noiDung?.baiTap || []).map(ex => {
+			const exId = ex._id || ex.id;
+			addExerciseToMap(exId, ex.cauHoi, ex.dapAnDung);
+			return {
+				id: exId,
+				question: ex.cauHoi,
+				type: ex.loai,
+				options: ex.phuongAn || [],
+				correctAnswer: ex.dapAnDung,
+				image: ex.anhDaiDien
+			};
+		});
+
 		const submittedStudents = allStudents
 			.filter(s => submittedStudentIds.has(s.studentId.toString()))
 			.map(student => {
@@ -537,62 +614,23 @@ const getLessonResults = async (req, res, next) => {
 					timeSpent: progress.thoiGianDaDung || 0,
 					completedAt: progress.ngayHoanThanh || progress.updatedAt,
 					attempts: progress.soLanThu || 1,
-					answers: (progress.cauTraLoi || []).map(answer => ({
-						exerciseId: answer.idBaiTap,
-						answer: answer.cauTraLoi,
-						isCorrect: answer.dung
-					}))
+					answers: (progress.cauTraLoi || []).map((answer, idx) => {
+						const exInfo = exerciseMap.get(answer.idBaiTap);
+						const fallbackLabel = `Câu ${idx + 1}`;
+						return {
+							exerciseId: answer.idBaiTap, // giữ id kỹ thuật
+							displayId: exInfo?.label || fallbackLabel,
+							questionLabel: exInfo?.label || fallbackLabel,
+							questionText: exInfo?.text || '',
+							correctAnswer: exInfo?.correctAnswer || '',
+							answer: answer.cauTraLoi,
+							isCorrect: answer.dung
+						};
+					})
 				};
 			});
 		
 		const notSubmittedStudents = allStudents.filter(s => !submittedStudentIds.has(s.studentId.toString()));
-		
-		const exercises = (lesson.noiDung?.baiTap || []).map(ex => ({
-			id: ex._id || ex.id,
-			question: ex.cauHoi,
-			type: ex.loai,
-			options: ex.phuongAn || [],
-			correctAnswer: ex.dapAnDung,
-			image: ex.anhDaiDien,
-			vanBan: ex.vanBan
-		}));
-		
-		const submittedStudentsWithDetails = submittedStudents.map(student => {
-			const studentAnswers = student.answers || [];
-			const answersWithExerciseDetails = studentAnswers.map(answer => {
-				const exercise = exercises.find(ex => ex.id === answer.exerciseId);
-				return {
-					exerciseId: answer.exerciseId,
-					exerciseQuestion: exercise?.question || '',
-					exerciseType: exercise?.type || '',
-					exerciseOptions: exercise?.options || [],
-					correctAnswer: exercise?.correctAnswer,
-					studentAnswer: answer.answer,
-					isCorrect: answer.isCorrect
-				};
-			});
-			
-			return {
-				studentId: student.studentId,
-				studentName: student.studentName,
-				studentAvatar: student.studentAvatar,
-				classId: student.classId,
-				className: student.className,
-				score: student.score,
-				timeSpent: student.timeSpent,
-				completedAt: student.completedAt,
-				attempts: student.attempts,
-				answers: answersWithExerciseDetails
-			};
-		});
-		
-		const notSubmittedStudentsList = notSubmittedStudents.map(student => ({
-			studentId: student.studentId,
-			studentName: student.studentName,
-			studentAvatar: student.studentAvatar,
-			classId: student.classId,
-			className: student.className
-		}));
 		
 		res.json({
 			success: true,
@@ -603,12 +641,11 @@ const getLessonResults = async (req, res, next) => {
 					description: lesson.moTa,
 					category: lesson.danhMuc,
 					level: lesson.capDo,
-					image: lesson.anhDaiDien,
 					classes: lesson.lop || []
 				},
 				exercises: exercises,
-				submittedStudents: submittedStudentsWithDetails,
-				notSubmittedStudents: notSubmittedStudentsList,
+				submittedStudents: submittedStudents,
+				notSubmittedStudents: notSubmittedStudents,
 				summary: {
 					totalStudents: allStudents.length,
 					submittedCount: submittedStudents.length,

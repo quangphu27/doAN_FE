@@ -529,7 +529,8 @@ const getClassLessonsWithStats = async (req, res, next) => {
 		
 		const classData = await Class.findById(classId)
 			.populate('hocSinh', 'hoTen ngaySinh gioiTinh anhDaiDien')
-			.populate('baiTap', 'tieuDe danhMuc capDo moTa anhDaiDien');
+			.populate('baiTap', 'tieuDe danhMuc capDo moTa anhDaiDien')
+			.populate('troChoi', 'tieuDe danhMuc loai moTa anhDaiDien');
 		
 		if (!classData) {
 			return res.status(404).json({ success: false, message: 'Không tìm thấy lớp' });
@@ -574,6 +575,38 @@ const getClassLessonsWithStats = async (req, res, next) => {
 				};
 			})
 		);
+
+		const gamesWithStats = await Promise.all(
+			(classData.troChoi || []).map(async (game) => {
+				const submittedProgress = await Progress.find({
+					troChoi: game._id,
+					treEm: { $in: studentIds },
+					trangThai: 'hoanThanh',
+					loai: 'troChoi'
+				});
+
+				const submittedCount = submittedProgress.length;
+				const notSubmittedCount = totalStudents - submittedCount;
+				const averageScore = submittedCount > 0
+					? Math.round(submittedProgress.reduce((sum, p) => sum + (p.diemSo || 0), 0) / submittedCount)
+					: 0;
+
+				return {
+					id: game._id,
+					title: game.tieuDe,
+					description: game.moTa,
+					category: game.danhMuc,
+					type: game.loai,
+					image: game.anhDaiDien,
+					summary: {
+						totalStudents: totalStudents,
+						submittedCount: submittedCount,
+						notSubmittedCount: notSubmittedCount,
+						averageScore: averageScore
+					}
+				};
+			})
+		);
 		
 		res.json({
 			success: true,
@@ -583,7 +616,8 @@ const getClassLessonsWithStats = async (req, res, next) => {
 					tenLop: classData.tenLop,
 					moTa: classData.moTa
 				},
-				lessons: lessonsWithStats
+				lessons: lessonsWithStats,
+				games: gamesWithStats
 			}
 		});
 	} catch (e) {

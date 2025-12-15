@@ -179,7 +179,15 @@ const recordGameResult = async (req, res, next) => {
 		});
 
 		const { gameId, score, timeSpent, answers, achievements } = await schema.validateAsync(req.body);
-		const childId = req.user.vaiTro === 'hocSinh' ? req.user.id : req.body.childId;
+		
+		let childId = req.body.childId;
+		if (req.user.vaiTro === 'hocSinh') {
+			const childRecord = await Child.findOne({ phuHuynh: req.user.id || req.user._id });
+			if (!childRecord) {
+				return res.status(404).json({ success: false, message: 'Không tìm thấy hồ sơ học sinh' });
+			}
+			childId = childRecord._id.toString();
+		}
 		
 		if (!childId) {
 			return res.status(400).json({ success: false, message: 'Child ID is required' });
@@ -236,13 +244,20 @@ const recordLessonResult = async (req, res, next) => {
 
 		const { lessonId, score, timeSpent, answers } = await schema.validateAsync(req.body);
 		
-		const childId = req.user.vaiTro === 'hocSinh' ? req.user.id : req.body.childId;
-		
-		const processedAnswers = answers;
+		let childId = req.body.childId;
+		if (req.user.vaiTro === 'hocSinh') {
+			const childRecord = await Child.findOne({ phuHuynh: req.user.id || req.user._id });
+			if (!childRecord) {
+				return res.status(404).json({ success: false, message: 'Không tìm thấy hồ sơ học sinh' });
+			}
+			childId = childRecord._id.toString();
+		}
 		
 		if (!childId) {
 			return res.status(400).json({ success: false, message: 'Child ID is required' });
 		}
+		
+		const processedAnswers = answers;
 
 		const existingProgress = await Progress.findOne({
 			treEm: childId,
@@ -250,38 +265,28 @@ const recordLessonResult = async (req, res, next) => {
 			loai: 'baiHoc'
 		});
 
-		let progress;
 		if (existingProgress) {
-			progress = await Progress.findByIdAndUpdate(existingProgress._id, {
-				loai: 'baiHoc',
-				trangThai: 'hoanThanh',
-				diemSo: score,
-				thoiGianDaDung: timeSpent || 0,
-				ngayHoanThanh: new Date(),
-				cauTraLoi: (processedAnswers || []).map(a => ({
-					idBaiTap: a.exerciseId,
-					cauTraLoi: a.answer,
-					dung: a.isCorrect
-				})),
-				soLanThu: (existingProgress.soLanThu || 0) + 1
-			}, { new: true });
-		} else {
-			progress = await Progress.create({
-				treEm: childId,
-				baiHoc: lessonId,
-				loai: 'baiHoc',
-				trangThai: 'hoanThanh',
-				diemSo: score,
-				thoiGianDaDung: timeSpent || 0,
-				ngayHoanThanh: new Date(),
-				cauTraLoi: (processedAnswers || []).map(a => ({
-					idBaiTap: a.exerciseId,
-					cauTraLoi: a.answer,
-					dung: a.isCorrect
-				})),
-				soLanThu: 1
+			return res.status(400).json({
+				success: false,
+				message: 'Học sinh đã nộp bài, chỉ được làm 1 lần'
 			});
 		}
+
+		const progress = await Progress.create({
+			treEm: childId,
+			baiHoc: lessonId,
+			loai: 'baiHoc',
+			trangThai: 'hoanThanh',
+			diemSo: score,
+			thoiGianDaDung: timeSpent || 0,
+			ngayHoanThanh: new Date(),
+			cauTraLoi: (processedAnswers || []).map(a => ({
+				idBaiTap: a.exerciseId,
+				cauTraLoi: a.answer,
+				dung: a.isCorrect
+			})),
+			soLanThu: 1
+		});
 		
 		const newAchievements = [];
 		if (score >= 90) newAchievements.push('excellent');
