@@ -377,6 +377,34 @@ const refresh = async (req, res, next) => {
 
 const updateProfile = async (req, res, next) => {
 	try {
+		const rawBody = { ...req.body };
+		if (rawBody.thongTinCaNhan && typeof rawBody.thongTinCaNhan.ngaySinh === 'string') {
+			const value = rawBody.thongTinCaNhan.ngaySinh.trim();
+			if (value) {
+				let parsedDate = null;
+				const ddmmyyyy = /^(\d{2})\/(\d{2})\/(\d{4})$/;
+				const match = value.match(ddmmyyyy);
+				if (match) {
+					const d = parseInt(match[1], 10);
+					const m = parseInt(match[2], 10) - 1;
+					const y = parseInt(match[3], 10);
+					const date = new Date(y, m, d);
+					if (!isNaN(date.getTime())) {
+						parsedDate = date;
+					}
+				}
+				if (!parsedDate) {
+					const direct = new Date(value);
+					if (!isNaN(direct.getTime())) parsedDate = direct;
+				}
+				if (parsedDate) {
+					rawBody.thongTinCaNhan.ngaySinh = parsedDate;
+				} else {
+					delete rawBody.thongTinCaNhan.ngaySinh;
+				}
+			}
+		}
+
 		const schema = Joi.object({
 			hoTen: Joi.string().optional(),
 			thongTinCaNhan: Joi.object({
@@ -392,7 +420,7 @@ const updateProfile = async (req, res, next) => {
 				muiGio: Joi.string().optional()
 			}).optional()
 		});
-		const updateData = await schema.validateAsync(req.body);
+		const updateData = await schema.validateAsync(rawBody);
 		const user = await User.findByIdAndUpdate(req.user.id, updateData, { new: true });
 		const userObj = user.toObject();
 		userObj.id = userObj._id;
