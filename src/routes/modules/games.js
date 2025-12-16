@@ -16,7 +16,8 @@ const {
 	createGuessingGame,
 	saveGameResult,
 	getGameHistory,
-	getGameResults
+	getGameResults,
+	gradeGameResult
 } = require('../../controllers/gameController');
 const router = express.Router();
 router.use(authenticate);
@@ -44,6 +45,11 @@ router.post(
 	authorize(['parent', 'child', 'phuHuynh', 'hocSinh', 'admin']), 
 	upload.single('resultImage'), 
 	saveGameResult
+);
+router.post(
+	'/results/:progressId/grade',
+	authorize(['giaoVien']),
+	gradeGameResult
 );
 router.get(
 	'/child/:childId/history', 

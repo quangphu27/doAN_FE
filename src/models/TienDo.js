@@ -15,14 +15,21 @@ const TienDoSchema = new mongoose.Schema(
 		soLanThu: { type: Number, default: 0 },
 		ngayHoanThanh: Date,
 		ghiChu: String,
-	tepKetQua: String,
-	duLieuKetQua: mongoose.Schema.Types.Mixed,
+		tepKetQua: String,
+		duLieuKetQua: mongoose.Schema.Types.Mixed,
 		cauTraLoi: [{
 			idBaiTap: { type: String, required: true },
 			cauTraLoi: { type: String, required: true },
 			dung: { type: Boolean, required: true }
 		}],
-		loai: { type: String, enum: ['baiHoc', 'troChoi'], default: 'baiHoc' }
+		loai: { type: String, enum: ['baiHoc', 'troChoi'], default: 'baiHoc' },
+		// Chấm điểm thủ công của giáo viên (dùng cho game tô màu, bài tự luận, ...)
+		trangThaiChamDiem: { 
+			type: String, 
+			enum: ['chuaCham', 'daCham'], 
+			default: 'chuaCham' 
+		},
+		diemGiaoVien: { type: Number, default: null }
 	},
 	{ timestamps: true }
 );
@@ -32,3 +39,4 @@ TienDoSchema.index({ treEm: 1, troChoi: 1 }, { unique: true, partialFilterExpres
 
 module.exports = mongoose.model('TienDo', TienDoSchema);
 
+	

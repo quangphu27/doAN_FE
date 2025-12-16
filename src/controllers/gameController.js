@@ -740,6 +740,12 @@ const createGuessingGame = async (req, res, next) => {
 
 const saveGameResult = async (req, res, next) => {
 	try {
+		const logBody = { ...req.body };
+		if (logBody.resultImageBase64 && logBody.resultImageBase64.length > 100) {
+			logBody.resultImageBase64 = logBody.resultImageBase64.substring(0, 100) + '... (truncated)';
+		}
+		console.log('[saveGameResult] Request body:', JSON.stringify(logBody, null, 2));
+		
 		const { resultData, ...bodyWithoutResultData } = req.body;
 		
 		const schema = Joi.object({
@@ -756,6 +762,76 @@ const saveGameResult = async (req, res, next) => {
 			...validatedData,
 			resultData: resultData
 		};
+
+		let savedResultImage = null;
+		const resultDir = 'uploads/tomau/ketqua';
+		
+		if (!fs.existsSync(resultDir)) {
+			fs.mkdirSync(resultDir, { recursive: true });
+		}
+		
+		if (req.body.resultImageBase64) {
+			try {
+				const base64String = req.body.resultImageBase64;
+				const matches = base64String.match(/^data:(.+);base64,(.+)$/);
+				const ext = matches ? matches[1].split('/')[1] || 'png' : 'png';
+				const data = matches ? matches[2] : base64String;
+				const buffer = Buffer.from(data, 'base64');
+				const filename = `ketqua_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${ext}`;
+				const filepath = path.join(resultDir, filename);
+				fs.writeFileSync(filepath, buffer);
+				savedResultImage = filepath;
+				console.log('[saveGameResult] Đã lưu ảnh tô màu từ base64:', {
+					filepath: filepath,
+					filename: filename,
+					size: buffer.length
+				});
+			} catch (imgErr) {
+				console.error('[saveGameResult] Lỗi khi lưu ảnh từ base64:', imgErr);
+			}
+		}
+		else if (req.body.resultImageUrl || req.body.imageUrl) {
+			try {
+				const imageUrl = req.body.resultImageUrl || req.body.imageUrl;
+				
+				if (imageUrl.startsWith('/uploads/') || imageUrl.startsWith('uploads/')) {
+					const localPath = imageUrl.startsWith('/') ? imageUrl.substring(1) : imageUrl;
+					const fullPath = path.join(__dirname, '..', '..', localPath);
+					
+					if (fs.existsSync(fullPath)) {
+						const ext = path.extname(fullPath) || '.png';
+						const filename = `ketqua_${Date.now()}_${Math.random().toString(36).substr(2, 9)}${ext}`;
+						const destPath = path.join(resultDir, filename);
+						
+						fs.copyFileSync(fullPath, destPath);
+						savedResultImage = destPath;
+						
+						console.log('[saveGameResult] Đã copy ảnh tô màu:', {
+							source: fullPath,
+							destination: destPath,
+							filename: filename
+						});
+					} else {
+						console.warn('[saveGameResult] File không tồn tại:', fullPath);
+						savedResultImage = localPath;
+					}
+				}
+				else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+					savedResultImage = imageUrl;
+					console.log('[saveGameResult] Lưu URL ảnh:', imageUrl);
+				}
+				else {
+					savedResultImage = imageUrl;
+					console.log('[saveGameResult] Lưu đường dẫn ảnh:', imageUrl);
+				}
+			} catch (imgErr) {
+				console.error('[saveGameResult] Lỗi khi xử lý URL ảnh:', imgErr);
+			}
+		}
+		
+		if (!savedResultImage) {
+			console.log('[saveGameResult] Không có ảnh trong request body');
+		}
 		
 		const Progress = require('../models/TienDo');
 		const Game = require('../models/TroChoi');
@@ -819,11 +895,27 @@ const saveGameResult = async (req, res, next) => {
 				cauTraLoi: a.answer,
 				dung: a.isCorrect
 			})),
-			soLanThu: 1
+			soLanThu: 1,
+			trangThaiChamDiem: 'chuaCham',
+			diemGiaoVien: null
 		};
 
 		if (req.file) {
-			progressData.tepKetQua = req.file.path;
+			const resultDir = 'uploads/tomau/ketqua';
+			if (!fs.existsSync(resultDir)) {
+				fs.mkdirSync(resultDir, { recursive: true });
+			}
+			const ext = path.extname(req.file.originalname) || path.extname(req.file.filename) || '.png';
+			const filename = `ketqua_${Date.now()}_${Math.random().toString(36).substr(2, 9)}${ext}`;
+			const destPath = path.join(resultDir, filename);
+			fs.copyFileSync(req.file.path, destPath);
+			progressData.tepKetQua = destPath;
+			console.log('[saveGameResult] Đã lưu ảnh từ file upload:', destPath);
+		} else if (savedResultImage) {
+			progressData.tepKetQua = savedResultImage;
+			console.log('[saveGameResult] Đã lưu ảnh:', savedResultImage);
+		} else {
+			console.log('[saveGameResult] Cảnh báo: Không có ảnh kết quả được lưu');
 		}
 		if (resultData_final.resultData) {
 			progressData.duLieuKetQua = resultData_final.resultData;
@@ -842,8 +934,24 @@ const saveGameResult = async (req, res, next) => {
 			});
 		}
 
+		console.log('[saveGameResult] Lưu progress với dữ liệu:', {
+			childId: childId,
+			gameId: resultData_final.gameId,
+			gameType: resultData_final.gameType,
+			hasResultImage: !!progressData.tepKetQua,
+			resultImagePath: progressData.tepKetQua || 'null',
+			score: progressData.diemSo,
+			gradingStatus: progressData.trangThaiChamDiem
+		});
+
 		const progress = new Progress(progressData);
 		await progress.save();
+		
+		console.log('[saveGameResult] Đã lưu progress thành công:', {
+			progressId: progress._id.toString(),
+			tepKetQua: progress.tepKetQua || 'null',
+			timestamp: new Date().toISOString()
+		});
 		
 		res.json({
 			success: true,
@@ -866,10 +974,23 @@ const getGameResults = async (req, res, next) => {
 		const Class = require('../models/Lop');
 		const Progress = require('../models/TienDo');
 
+		console.log('[getGameResults] API được gọi:', {
+			gameId,
+			userRole: req.user?.vaiTro || 'unknown',
+			userId: (req.user?.id || req.user?._id || '').toString(),
+			timestamp: new Date().toISOString()
+		});
+
 		const game = await Game.findById(gameId).populate('lop', 'tenLop maLop giaoVien hocSinh');
 		if (!game) {
 			return res.status(404).json({ success: false, message: 'Không tìm thấy trò chơi' });
 		}
+
+		console.log('[getGameResults] Game tìm thấy:', {
+			gameId: game._id.toString(),
+			gameTitle: game.tieuDe || game.title || '',
+			gameType: game.loai || game.type || ''
+		});
 
 		if (req.user.vaiTro === 'giaoVien') {
 			const teacherClasses = await Class.find({ giaoVien: req.user.id || req.user._id });
@@ -930,10 +1051,52 @@ const getGameResults = async (req, res, next) => {
 			game.data.questions.forEach(q => addQuestionToMap(q.id || q._id, q.question || q.cauHoi, q.correctAnswer || q.dapAnDung));
 		}
 
+		const isColoringGame = game.loai === 'toMau' || game.type === 'coloring';
+
+		const getImageUrl = (filePath) => {
+			if (!filePath) return null;
+			if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
+				return filePath;
+			}
+			if (filePath.startsWith('uploads/')) {
+				return '/' + filePath.replace(/\\/g, '/');
+			}
+			if (filePath.startsWith('/')) {
+				return filePath.replace(/\\/g, '/');
+			}
+			return '/uploads/' + filePath.replace(/\\/g, '/');
+		};
+
 		const submittedStudents = allStudents
 			.filter(s => submittedStudentIds.has(s.studentId.toString()))
 			.map(student => {
 				const progress = submittedProgress.find(p => p.treEm._id.toString() === student.studentId.toString());
+
+				if (isColoringGame && progress && progress.tepKetQua) {
+					const logData = {
+						time: new Date().toISOString(),
+						gameId: game._id.toString(),
+						gameTitle: game.tieuDe || game.title || '',
+						gameType: game.loai || game.type || '',
+						studentId: student.studentId.toString(),
+						studentName: student.studentName || '',
+						progressId: progress._id.toString(),
+						resultImagePath: progress.tepKetQua,
+						resultImageUrl: getImageUrl(progress.tepKetQua),
+						hasImage: !!progress.tepKetQua
+					};
+
+					if (req.user && req.user.vaiTro === 'giaoVien') {
+						logData.teacherId = (req.user.id || req.user._id || '').toString();
+						logData.teacherName = req.user.hoTen || req.user.name || '';
+						console.log('[ColoringViewLog] Giáo viên xem bài tô màu:', JSON.stringify(logData, null, 2));
+					} else {
+						console.log('[ColoringViewLog] Xem bài tô màu (không phải giáo viên):', JSON.stringify(logData, null, 2));
+					}
+				}
+
+				const resultImageUrl = progress && progress.tepKetQua ? getImageUrl(progress.tepKetQua) : null;
+
 				return {
 					studentId: student.studentId,
 					studentName: student.studentName,
@@ -941,16 +1104,20 @@ const getGameResults = async (req, res, next) => {
 					classId: student.classId,
 					className: student.className,
 					score: progress.diemSo || 0,
+					progressId: progress._id,
+					teacherScore: typeof progress.diemGiaoVien === 'number' ? progress.diemGiaoVien : null,
+					gradingStatus: progress.trangThaiChamDiem || 'chuaCham',
 					timeSpent: progress.thoiGianDaDung || 0,
 					completedAt: progress.ngayHoanThanh || progress.updatedAt,
 					attempts: progress.soLanThu || 1,
-					resultImage: progress.tepKetQua || null,
+					resultImage: resultImageUrl,
+					resultImagePath: progress.tepKetQua || null,
 					answers: (progress.cauTraLoi || []).map((answer, idx) => {
 						const qInfo = questionMap.get(answer.idBaiTap);
 						const fallbackLabel = `Câu ${idx + 1}`;
 						return {
-							exerciseId: answer.idBaiTap, // giữ nguyên id kỹ thuật
-							displayId: qInfo?.label || fallbackLabel, // FE dùng để hiển thị
+							exerciseId: answer.idBaiTap,
+							displayId: qInfo?.label || fallbackLabel,
 							questionLabel: qInfo?.label || fallbackLabel,
 							questionText: qInfo?.text || '',
 							correctAnswer: qInfo?.correctAnswer || '',
@@ -1049,6 +1216,9 @@ const getGameHistory = async (req, res, next) => {
 						imageUrl: p.troChoi.anhDaiDien
 					} : null,
 					score: p.diemSo,
+					teacherScore: typeof p.diemGiaoVien === 'number' ? p.diemGiaoVien : null,
+					gradingStatus: p.trangThaiChamDiem || 'chuaCham',
+					resultImage: p.tepKetQua || null,
 					timeSpent: p.thoiGianDaDung,
 					completedAt: p.ngayHoanThanh || p.createdAt,
 					answers: p.cauTraLoi || []
@@ -1063,6 +1233,80 @@ const getGameHistory = async (req, res, next) => {
 		};
 		
 		res.json(responseData);
+	} catch (e) {
+		next(e);
+	}
+};
+
+// Giáo viên chấm điểm kết quả trò chơi (ví dụ game tô màu)
+const gradeGameResult = async (req, res, next) => {
+	try {
+		const Progress = require('../models/TienDo');
+		const Class = require('../models/Lop');
+
+		if (!req.user || req.user.vaiTro !== 'giaoVien') {
+			return res.status(403).json({
+				success: false,
+				message: 'Chỉ giáo viên mới được chấm điểm trò chơi'
+			});
+		}
+
+		const { progressId } = req.params;
+
+		const schema = Joi.object({
+			teacherScore: Joi.number().min(0).max(100).required(),
+			comment: Joi.string().allow('', null)
+		});
+
+		const { teacherScore, comment } = await schema.validateAsync(req.body);
+
+		const progress = await Progress.findById(progressId).populate('troChoi');
+		if (!progress || !progress.troChoi) {
+			return res.status(404).json({
+				success: false,
+				message: 'Không tìm thấy kết quả trò chơi để chấm'
+			});
+		}
+
+		// Kiểm tra quyền: giáo viên phải là GV của lớp có gán trò chơi này, hoặc là người tạo trò chơi
+		const game = progress.troChoi;
+		const teacherId = (req.user.id || req.user._id).toString();
+
+		let hasAccess = false;
+		if (game.lop && game.lop.length > 0) {
+			const teacherClasses = await Class.find({ giaoVien: teacherId }).select('_id');
+			const teacherClassIds = teacherClasses.map(c => c._id.toString());
+			const gameClassIds = (game.lop || []).map(c => c._id ? c._id.toString() : c.toString());
+			hasAccess = gameClassIds.some(id => teacherClassIds.includes(id));
+		}
+
+		if (!hasAccess && game.nguoiTao && game.nguoiTao.toString() === teacherId) {
+			hasAccess = true;
+		}
+
+		if (!hasAccess) {
+			return res.status(403).json({
+				success: false,
+				message: 'Bạn không có quyền chấm điểm kết quả này'
+			});
+		}
+
+		progress.diemGiaoVien = teacherScore;
+		progress.trangThaiChamDiem = 'daCham';
+		if (typeof comment === 'string') {
+			progress.ghiChu = comment;
+		}
+
+		await progress.save();
+
+		return res.json({
+			success: true,
+			data: {
+				progressId: progress._id,
+				teacherScore: progress.diemGiaoVien,
+				status: progress.trangThaiChamDiem
+			}
+		});
 	} catch (e) {
 		next(e);
 	}
@@ -1084,5 +1328,6 @@ module.exports = {
 	createGuessingGame,
 	saveGameResult,
 	getGameHistory,
-	getGameResults
+	getGameResults,
+	gradeGameResult
 };

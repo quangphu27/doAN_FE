@@ -12,7 +12,7 @@ router.post('/:id/complete', authorize(['parent','admin']), completeLesson);
 router.get('/child/:childId/recommended', authorize(['parent','admin']), getRecommendedLessons);
 router.get('/:id/completion/:childId', authenticate, checkLessonCompletion);
 router.get('/child/:childId/history', authenticate, getLessonHistory);
-router.get('/:lessonId/results', authenticate, authorize(['admin', 'giaoVien']), getLessonResults);
+router.get('/:lessonId/results', authenticate, authorize(['admin', 'giaoVien', 'hocSinh', 'phuHuynh', 'parent', 'child']), getLessonResults);
 router.post('/', authenticate, authorize(['admin', 'giaoVien']), createLesson);
 router.put('/:id', authorize(['admin']), updateLesson);
 router.delete('/:id', authorize(['admin']), deleteLesson);
