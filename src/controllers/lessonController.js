@@ -1,7 +1,11 @@
 const Joi = require('joi');
 const Lesson = require('../models/BaiHoc');
 const Child = require('../models/TreEm');
+const User = require('../models/NguoiDung');
 const Progress = require('../models/TienDo');
+const path = require('path');
+const { generateItemResultReportPdf } = require('../utils/pdfReportGenerator');
+const { sendReportEmail } = require('../services/emailService');
 
 const listLessons = async (req, res, next) => {
 	try {
@@ -661,6 +665,237 @@ const getLessonResults = async (req, res, next) => {
 	}
 };
 
+const exportLessonResultsReport = async (req, res, next) => {
+	try {
+		const { lessonId } = req.params;
+		const Class = require('../models/Lop');
+
+		if (!req.user || req.user.vaiTro !== 'giaoVien') {
+			return res.status(403).json({
+				success: false,
+				message: 'Chỉ giáo viên mới được xuất báo cáo kết quả bài học'
+			});
+		}
+
+		const teacher = await User.findById(req.user.id || req.user._id).select('email hoTen');
+		const lesson = await Lesson.findById(lessonId).populate('lop', 'tenLop maLop giaoVien hocSinh');
+		if (!lesson) {
+			return res.status(404).json({ success: false, message: 'Không tìm thấy bài học' });
+		}
+
+		const teacherClasses = await Class.find({ giaoVien: req.user.id || req.user._id }).select('_id');
+		const teacherClassIds = teacherClasses.map(c => c._id.toString());
+		const lessonClassIds = (lesson.lop || []).map(c => (c._id || c).toString());
+		const hasAccess = lessonClassIds.some(id => teacherClassIds.includes(id));
+
+		if (!hasAccess && lesson.nguoiTao?.toString() !== (req.user.id || req.user._id)?.toString()) {
+			return res.status(403).json({
+				success: false,
+				message: 'Bạn không có quyền xem kết quả bài học này'
+			});
+		}
+
+		const ClassModel = require('../models/Lop');
+		const allStudents = [];
+		for (const classId of lessonClassIds) {
+			const classData = await ClassModel.findById(classId).populate('hocSinh', 'hoTen');
+			if (classData && classData.hocSinh && classData.hocSinh.length > 0) {
+				allStudents.push(...classData.hocSinh.map(student => ({
+					studentId: student._id,
+					studentName: student.hoTen,
+					className: classData.tenLop
+				})));
+			}
+		}
+
+		const studentIds = allStudents.map(s => s.studentId);
+		const submittedProgress = await Progress.find({
+			baiHoc: lessonId,
+			treEm: { $in: studentIds },
+			trangThai: 'hoanThanh',
+			loai: 'baiHoc'
+		}).populate('treEm', 'hoTen');
+
+		const submittedMap = new Map(
+			submittedProgress.map(p => [p.treEm._id.toString(), p])
+		);
+
+		const submittedStudents = allStudents
+			.filter(s => submittedMap.has(s.studentId.toString()))
+			.map(s => {
+				const p = submittedMap.get(s.studentId.toString());
+				return {
+					studentName: s.studentName,
+					className: s.className,
+					score: p.diemSo || 0,
+					teacherScore: typeof p.diemGiaoVien === 'number' ? p.diemGiaoVien : null,
+					timeSpent: p.thoiGianDaDung || 0
+				};
+			});
+
+		const summary = {
+			totalStudents: allStudents.length,
+			submittedCount: submittedStudents.length,
+			notSubmittedCount: allStudents.length - submittedStudents.length,
+			averageScore: submittedStudents.length > 0
+				? Math.round(submittedStudents.reduce((sum, s) => sum + (s.score || 0), 0) / submittedStudents.length)
+				: 0
+		};
+
+		const outputDir = path.join(__dirname, '..', '..', 'uploads', 'reports');
+		const { filePath, fileName } = await generateItemResultReportPdf({
+			item: {
+				title: lesson.tieuDe || 'Bài học',
+				description: lesson.moTa || '',
+				type: 'Bài học',
+				category: lesson.danhMuc || ''
+			},
+			summary,
+			results: submittedStudents,
+			outputDir
+		});
+
+		res.json({
+			success: true,
+			data: {
+				message: 'Đã tạo file báo cáo PDF',
+				fileName,
+				fileUrl: `/uploads/reports/${fileName}`
+			}
+		});
+	} catch (e) {
+		next(e);
+	}
+};
+
+// Giáo viên gửi báo cáo PDF kết quả bài học về email (có thể tạo lại file)
+const sendLessonResultsReportEmail = async (req, res, next) => {
+	try {
+		const { lessonId } = req.params;
+		const Class = require('../models/Lop');
+
+		if (!req.user || req.user.vaiTro !== 'giaoVien') {
+			return res.status(403).json({
+				success: false,
+				message: 'Chỉ giáo viên mới được gửi báo cáo kết quả bài học'
+			});
+		}
+
+		const teacher = await User.findById(req.user.id || req.user._id).select('email hoTen');
+		if (!teacher || !teacher.email) {
+			return res.status(400).json({
+				success: false,
+				message: 'Tài khoản giáo viên chưa có email, không thể gửi báo cáo'
+			});
+		}
+
+		const lesson = await Lesson.findById(lessonId).populate('lop', 'tenLop maLop giaoVien hocSinh');
+		if (!lesson) {
+			return res.status(404).json({ success: false, message: 'Không tìm thấy bài học' });
+		}
+
+		const teacherClasses = await Class.find({ giaoVien: req.user.id || req.user._id }).select('_id');
+		const teacherClassIds = teacherClasses.map(c => c._id.toString());
+		const lessonClassIds = (lesson.lop || []).map(c => (c._id || c).toString());
+		const hasAccess = lessonClassIds.some(id => teacherClassIds.includes(id));
+
+		if (!hasAccess && lesson.nguoiTao?.toString() !== (req.user.id || req.user._id)?.toString()) {
+			return res.status(403).json({
+				success: false,
+				message: 'Bạn không có quyền xem kết quả bài học này'
+			});
+		}
+
+		const ClassModel = require('../models/Lop');
+		const allStudents = [];
+		for (const classId of lessonClassIds) {
+			const classData = await ClassModel.findById(classId).populate('hocSinh', 'hoTen');
+			if (classData && classData.hocSinh && classData.hocSinh.length > 0) {
+				allStudents.push(...classData.hocSinh.map(student => ({
+					studentId: student._id,
+					studentName: student.hoTen,
+					className: classData.tenLop
+				})));
+			}
+		}
+
+		const studentIds = allStudents.map(s => s.studentId);
+		const submittedProgress = await Progress.find({
+			baiHoc: lessonId,
+			treEm: { $in: studentIds },
+			trangThai: 'hoanThanh',
+			loai: 'baiHoc'
+		}).populate('treEm', 'hoTen');
+
+		const submittedMap = new Map(
+			submittedProgress.map(p => [p.treEm._id.toString(), p])
+		);
+
+		const submittedStudents = allStudents
+			.filter(s => submittedMap.has(s.studentId.toString()))
+			.map(s => {
+				const p = submittedMap.get(s.studentId.toString());
+				return {
+					studentName: s.studentName,
+					className: s.className,
+					score: p.diemSo || 0,
+					teacherScore: typeof p.diemGiaoVien === 'number' ? p.diemGiaoVien : null,
+					timeSpent: p.thoiGianDaDung || 0
+				};
+			});
+
+		const summary = {
+			totalStudents: allStudents.length,
+			submittedCount: submittedStudents.length,
+			notSubmittedCount: allStudents.length - submittedStudents.length,
+			averageScore: submittedStudents.length > 0
+				? Math.round(submittedStudents.reduce((sum, s) => sum + (s.score || 0), 0) / submittedStudents.length)
+				: 0
+		};
+
+		const outputDir = path.join(__dirname, '..', '..', 'uploads', 'reports');
+		const { filePath, fileName } = await generateItemResultReportPdf({
+			item: {
+				title: lesson.tieuDe || 'Bài học',
+				description: lesson.moTa || '',
+				type: 'Bài học',
+				category: lesson.danhMuc || ''
+			},
+			summary,
+			results: submittedStudents,
+			outputDir
+		});
+
+		await sendReportEmail({
+			to: teacher.email,
+			subject: `Báo cáo kết quả bài học: ${lesson.tieuDe || ''}`,
+			html: `
+				<p>Xin chào ${teacher.hoTen || 'thầy/cô'},</p>
+				<p>Hệ thống gửi kèm báo cáo kết quả bài học <strong>${lesson.tieuDe || ''}</strong>.</p>
+				<ul>
+					<li>Tổng số học sinh: ${summary.totalStudents}</li>
+					<li>Đã nộp: ${summary.submittedCount}</li>
+					<li>Chưa nộp: ${summary.notSubmittedCount}</li>
+					<li>Điểm trung bình: ${summary.averageScore}%</li>
+				</ul>
+				<p>Trân trọng.</p>
+			`,
+			pdfPath: filePath,
+			pdfName: fileName
+		});
+
+		res.json({
+			success: true,
+			data: {
+				message: 'Đã tạo và gửi báo cáo PDF tới email giáo viên',
+				fileName
+			}
+		});
+	} catch (e) {
+		next(e);
+	}
+};
+
 module.exports = {
 	listLessons,
 	getLessonById,
@@ -674,5 +909,7 @@ module.exports = {
 	searchLessons,
 	checkLessonCompletion,
 	getLessonHistory,
-	getLessonResults
+	getLessonResults,
+	exportLessonResultsReport,
+	sendLessonResultsReportEmail
 };

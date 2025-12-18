@@ -5,6 +5,9 @@ const Child = require('../models/TreEm');
 const Lesson = require('../models/BaiHoc');
 const Game = require('../models/TroChoi');
 const Progress = require('../models/TienDo');
+const path = require('path');
+const { generateStudentReportPdf } = require('../utils/pdfReportGenerator');
+const { sendReportEmail } = require('../services/emailService');
 
 const listClasses = async (req, res, next) => {
 	try {
@@ -422,6 +425,169 @@ const getStudentProgress = async (req, res, next) => {
 	}
 };
 
+const exportStudentReport = async (req, res, next) => {
+	try {
+		const classId = req.params.id;
+		const studentId = req.params.studentId;
+
+		if (!req.user || req.user.vaiTro !== 'giaoVien') {
+			return res.status(403).json({
+				success: false,
+				message: 'Chỉ giáo viên mới được xuất báo cáo học sinh'
+			});
+		}
+
+		const teacher = await User.findById(req.user.id || req.user._id).select('email hoTen');
+		const classData = await Class.findById(classId);
+		if (!classData) {
+			return res.status(404).json({ success: false, message: 'Không tìm thấy lớp' });
+		}
+
+		const userId = req.user.id || req.user._id;
+		if (req.user.vaiTro === 'giaoVien' && classData.giaoVien.toString() !== userId.toString()) {
+			return res.status(403).json({ success: false, message: 'Bạn không có quyền xem kết quả học sinh này' });
+		}
+
+		if (!classData.hocSinh.includes(studentId)) {
+			return res.status(400).json({ success: false, message: 'Học sinh không thuộc lớp này' });
+		}
+
+		const student = await Child.findById(studentId);
+		if (!student) {
+			return res.status(404).json({ success: false, message: 'Không tìm thấy học sinh' });
+		}
+
+		const progress = await Progress.find({
+			treEm: studentId,
+			trangThai: 'hoanThanh'
+		})
+			.populate('baiHoc', 'tieuDe danhMuc')
+			.populate('troChoi', 'tieuDe danhMuc loai')
+			.sort({ ngayHoanThanh: -1 });
+
+		const activities = progress.map(p => ({
+			title: (p.baiHoc && p.baiHoc.tieuDe) || (p.troChoi && p.troChoi.tieuDe) || 'N/A',
+			type: p.loai === 'troChoi' ? 'troChoi' : 'baiHoc',
+			category: (p.baiHoc && p.baiHoc.danhMuc) || (p.troChoi && p.troChoi.danhMuc) || '',
+			score: p.diemSo || 0,
+			timeSpent: p.thoiGianDaDung || 0,
+			completedAt: p.ngayHoanThanh || p.updatedAt
+		}));
+
+		const outputDir = path.join(__dirname, '..', '..', 'uploads', 'reports');
+		const { filePath, fileName } = await generateStudentReportPdf({
+			student: {
+				name: student.hoTen,
+				className: classData.tenLop
+			},
+			activities,
+			outputDir
+		});
+
+		res.json({
+			success: true,
+			data: {
+				message: 'Đã tạo file báo cáo PDF',
+				fileName,
+				fileUrl: `/uploads/reports/${fileName}`
+			}
+		});
+	} catch (e) {
+		next(e);
+	}
+};
+
+// Giáo viên gửi báo cáo PDF theo từng học sinh (trong một lớp) về email
+const sendStudentReportEmail = async (req, res, next) => {
+	try {
+		const classId = req.params.id;
+		const studentId = req.params.studentId;
+
+		if (!req.user || req.user.vaiTro !== 'giaoVien') {
+			return res.status(403).json({
+				success: false,
+				message: 'Chỉ giáo viên mới được gửi báo cáo học sinh'
+			});
+		}
+
+		const teacher = await User.findById(req.user.id || req.user._id).select('email hoTen');
+		if (!teacher || !teacher.email) {
+			return res.status(400).json({
+				success: false,
+				message: 'Tài khoản giáo viên chưa có email, không thể gửi báo cáo'
+			});
+		}
+
+		const classData = await Class.findById(classId);
+		if (!classData) {
+			return res.status(404).json({ success: false, message: 'Không tìm thấy lớp' });
+		}
+
+		const userId = req.user.id || req.user._id;
+		if (req.user.vaiTro === 'giaoVien' && classData.giaoVien.toString() !== userId.toString()) {
+			return res.status(403).json({ success: false, message: 'Bạn không có quyền xem kết quả học sinh này' });
+		}
+
+		if (!classData.hocSinh.includes(studentId)) {
+			return res.status(400).json({ success: false, message: 'Học sinh không thuộc lớp này' });
+		}
+
+		const student = await Child.findById(studentId);
+		if (!student) {
+			return res.status(404).json({ success: false, message: 'Không tìm thấy học sinh' });
+		}
+
+		const progress = await Progress.find({
+			treEm: studentId,
+			trangThai: 'hoanThanh'
+		})
+			.populate('baiHoc', 'tieuDe danhMuc')
+			.populate('troChoi', 'tieuDe danhMuc loai')
+			.sort({ ngayHoanThanh: -1 });
+
+		const activities = progress.map(p => ({
+			title: (p.baiHoc && p.baiHoc.tieuDe) || (p.troChoi && p.troChoi.tieuDe) || 'N/A',
+			type: p.loai === 'troChoi' ? 'troChoi' : 'baiHoc',
+			category: (p.baiHoc && p.baiHoc.danhMuc) || (p.troChoi && p.troChoi.danhMuc) || '',
+			score: p.diemSo || 0,
+			timeSpent: p.thoiGianDaDung || 0,
+			completedAt: p.ngayHoanThanh || p.updatedAt
+		}));
+
+		const outputDir = path.join(__dirname, '..', '..', 'uploads', 'reports');
+		const { filePath, fileName } = await generateStudentReportPdf({
+			student: {
+				name: student.hoTen,
+				className: classData.tenLop
+			},
+			activities,
+			outputDir
+		});
+
+		await sendReportEmail({
+			to: teacher.email,
+			subject: `Báo cáo kết quả học sinh: ${student.hoTen}`,
+			html: `
+				<p>Xin chào ${teacher.hoTen || 'thầy/cô'},</p>
+				<p>Hệ thống gửi kèm báo cáo kết quả học tập của học sinh <strong>${student.hoTen}</strong> trong lớp <strong>${classData.tenLop}</strong>.</p>
+				<p>Trân trọng.</p>
+			`,
+			pdfPath: filePath,
+			pdfName: fileName
+		});
+
+		res.json({
+			success: true,
+			data: {
+				message: 'Đã tạo và gửi báo cáo PDF tới email giáo viên',
+				fileName
+			}
+		});
+	} catch (e) {
+		next(e);
+	}
+};
+
 const createLessonInClass = async (req, res, next) => {
 	try {
 		const classId = req.params.id;
@@ -639,6 +805,8 @@ module.exports = {
 	createLessonInClass,
 	updateLessonInClass,
 	createGameInClass,
-	getClassLessonsWithStats
+	getClassLessonsWithStats,
+	exportStudentReport,
+	sendStudentReportEmail
 };
 

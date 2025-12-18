@@ -17,7 +17,9 @@ const {
 	saveGameResult,
 	getGameHistory,
 	getGameResults,
-	gradeGameResult
+	gradeGameResult,
+	exportGameResultsReport,
+	sendGameResultsReportEmail
 } = require('../../controllers/gameController');
 const router = express.Router();
 router.use(authenticate);
@@ -57,5 +59,7 @@ router.get(
 	getGameHistory
 );
 router.get('/:gameId/results', authorize(['admin', 'giaoVien']), getGameResults);
+router.get('/:gameId/results/export/pdf', authorize(['giaoVien']), exportGameResultsReport);
+router.get('/:gameId/results/send-email', authorize(['giaoVien']), sendGameResultsReportEmail);
 
 module.exports = router;

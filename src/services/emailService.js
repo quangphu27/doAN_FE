@@ -25,7 +25,7 @@ const getTransporter = () => {
 	}
 	return transporter;
 };
-// nó ở đây
+
 const sendOTPEmail = async (email, otp) => {
 	try {
 		const mailTransporter = getTransporter();
@@ -59,7 +59,39 @@ const sendOTPEmail = async (email, otp) => {
 	}
 };
 
+// Gửi email kèm file PDF báo cáo
+const sendReportEmail = async ({ to, subject, html, pdfPath, pdfName }) => {
+	try {
+		const mailTransporter = getTransporter();
+
+		const mailOptions = {
+			from: process.env.EMAIL_USER,
+			to,
+			subject,
+			html,
+			attachments: pdfPath
+				? [
+					{
+						filename: pdfName || 'bao-cao.pdf',
+						path: pdfPath,
+						contentType: 'application/pdf'
+					}
+				]
+				: []
+		};
+
+		await mailTransporter.sendMail(mailOptions);
+		return true;
+	} catch (error) {
+		if (error.message && error.message.includes('EMAIL_USER and EMAIL_PASSWORD')) {
+			throw error;
+		}
+		return false;
+	}
+};
+
 module.exports = {
-	sendOTPEmail
+	sendOTPEmail,
+	sendReportEmail
 };
 

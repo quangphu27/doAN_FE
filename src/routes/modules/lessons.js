@@ -1,6 +1,6 @@
 const express = require('express');
 const { authenticate, authorize } = require('../../middleware/auth');
-const { listLessons, getLessonById, getRandomExercises, completeLesson, createLesson, updateLesson, deleteLesson, getLessonsByCategory, getRecommendedLessons, searchLessons, checkLessonCompletion, getLessonHistory, getLessonResults } = require('../../controllers/lessonController');
+const { listLessons, getLessonById, getRandomExercises, completeLesson, createLesson, updateLesson, deleteLesson, getLessonsByCategory, getRecommendedLessons, searchLessons, checkLessonCompletion, getLessonHistory, getLessonResults, exportLessonResultsReport, sendLessonResultsReportEmail } = require('../../controllers/lessonController');
 const router = express.Router();
 router.get('/', authenticate, listLessons);
 router.get('/search', searchLessons);
@@ -13,6 +13,8 @@ router.get('/child/:childId/recommended', authorize(['parent','admin']), getReco
 router.get('/:id/completion/:childId', authenticate, checkLessonCompletion);
 router.get('/child/:childId/history', authenticate, getLessonHistory);
 router.get('/:lessonId/results', authenticate, authorize(['admin', 'giaoVien', 'hocSinh', 'phuHuynh', 'parent', 'child']), getLessonResults);
+router.get('/:lessonId/results/export/pdf', authenticate, authorize(['giaoVien']), exportLessonResultsReport);
+router.get('/:lessonId/results/send-email', authenticate, authorize(['giaoVien']), sendLessonResultsReportEmail);
 router.post('/', authenticate, authorize(['admin', 'giaoVien']), createLesson);
 router.put('/:id', authorize(['admin']), updateLesson);
 router.delete('/:id', authorize(['admin']), deleteLesson);
