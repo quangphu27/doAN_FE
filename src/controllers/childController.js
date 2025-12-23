@@ -234,22 +234,22 @@ const getChildActivities = async (req, res, next) => {
 			return res.status(404).json({ success: false, message: 'Child not found' });
 		}
 
-		const filter = { child: child._id };
-		if (type) filter.type = type;
-		if (startDate && endDate) {
-			filter.createdAt = {
-				$gte: new Date(startDate),
-				$lte: new Date(endDate)
-			};
-		}
+	const filter = { treEm: child._id };
+	if (type) filter.loai = type === 'lesson' ? 'baiHoc' : type === 'game' ? 'troChoi' : type;
+	if (startDate && endDate) {
+		filter.createdAt = {
+			$gte: new Date(startDate),
+			$lte: new Date(endDate)
+		};
+	}
 
-		const Progress = require('../models/TienDo');
-		const activities = await Progress.find(filter)
-			.populate('lesson', 'title category level content')
-			.populate('game', 'title type category')
-			.sort({ createdAt: -1 })
-			.limit(parseInt(limit))
-			.skip((parseInt(page) - 1) * parseInt(limit));
+	const Progress = require('../models/TienDo');
+	const activities = await Progress.find(filter)
+		.populate('baiHoc', 'tieuDe danhMuc capDo noiDung')
+		.populate('troChoi', 'tieuDe loai danhMuc')
+		.sort({ createdAt: -1 })
+		.limit(parseInt(limit))
+		.skip((parseInt(page) - 1) * parseInt(limit));
 
 		const processedActivities = activities;
 
@@ -280,48 +280,48 @@ const getChildGameResults = async (req, res, next) => {
 		const child = await Child.findOne({ _id: childId, phuHuynh: req.user.id });
 		if (!child) return res.status(404).json({ success: false, message: 'Child not found' });
 
-		const filter = { child: child._id, type: 'game' };
-		if (gameType) {
-			const Game = require('../models/TroChoi');
-			const games = await Game.find({ type: gameType });
-			filter.game = { $in: games.map(g => g._id) };
-		}
-		if (startDate && endDate) {
-			filter.createdAt = {
-				$gte: new Date(startDate),
-				$lte: new Date(endDate)
-			};
-		}
+	const filter = { treEm: child._id, loai: 'troChoi' };
+	if (gameType) {
+		const Game = require('../models/TroChoi');
+		const games = await Game.find({ loai: gameType });
+		filter.troChoi = { $in: games.map(g => g._id) };
+	}
+	if (startDate && endDate) {
+		filter.createdAt = {
+			$gte: new Date(startDate),
+			$lte: new Date(endDate)
+		};
+	}
 
-		const Progress = require('../models/TienDo');
-		const gameResults = await Progress.find(filter)
-			.populate('game', 'title type category')
-			.sort({ createdAt: -1 })
-			.limit(parseInt(limit))
-			.skip((parseInt(page) - 1) * parseInt(limit));
+	const Progress = require('../models/TienDo');
+	const gameResults = await Progress.find(filter)
+		.populate('troChoi', 'tieuDe loai danhMuc')
+		.sort({ createdAt: -1 })
+		.limit(parseInt(limit))
+		.skip((parseInt(page) - 1) * parseInt(limit));
 
-		const total = await Progress.countDocuments(filter);
+	const total = await Progress.countDocuments(filter);
 
-		const gameStats = await Progress.aggregate([
-			{ $match: { child: child._id, type: 'game' } },
-			{
-				$group: {
-					_id: '$game',
-					totalGames: { $sum: 1 },
-					averageScore: { $avg: '$score' },
-					bestScore: { $max: '$score' },
-					totalTimeSpent: { $sum: '$timeSpent' }
-				}
-			},
-			{
-				$lookup: {
-					from: 'trochois',
-					localField: '_id',
-					foreignField: '_id',
-					as: 'gameInfo'
-				}
+	const gameStats = await Progress.aggregate([
+		{ $match: { treEm: child._id, loai: 'troChoi' } },
+		{
+			$group: {
+				_id: '$troChoi',
+				totalGames: { $sum: 1 },
+				averageScore: { $avg: '$diemSo' },
+				bestScore: { $max: '$diemSo' },
+				totalTimeSpent: { $sum: '$thoiGianDaDung' }
 			}
-		]);
+		},
+		{
+			$lookup: {
+				from: 'trochois',
+				localField: '_id',
+				foreignField: '_id',
+				as: 'gameInfo'
+			}
+		}
+	]);
 
 		res.json({
 			success: true,
