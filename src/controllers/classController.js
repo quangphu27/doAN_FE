@@ -215,9 +215,7 @@ const addStudent = async (req, res, next) => {
 		const value = await schema.validateAsync(req.body);
 		const classId = req.params.id;
 		
-		const classData = await Class.findById(classId)
-			.populate('baiTap', 'tieuDe danhMuc')
-			.populate('troChoi', 'tieuDe danhMuc');
+		const classData = await Class.findById(classId);
 		if (!classData) {
 			return res.status(404).json({ success: false, message: 'Không tìm thấy lớp' });
 		}
@@ -266,9 +264,7 @@ const removeStudent = async (req, res, next) => {
 		const classId = req.params.id;
 		const studentId = req.params.studentId;
 		
-		const classData = await Class.findById(classId)
-			.populate('baiTap', 'tieuDe danhMuc')
-			.populate('troChoi', 'tieuDe danhMuc');
+		const classData = await Class.findById(classId);
 		if (!classData) {
 			return res.status(404).json({ success: false, message: 'Không tìm thấy lớp' });
 		}
@@ -326,6 +322,35 @@ const getClassProgress = async (req, res, next) => {
 			const student = classData.hocSinh.find(s => s._id.toString() === studentId.toString());
 			const studentProgressData = progress.filter(p => p.treEm._id.toString() === studentId.toString());
 			
+			const progressList = studentProgressData.map(p => ({
+				id: p._id,
+				baiHoc: p.baiHoc,
+				troChoi: p.troChoi,
+				diemSo: p.diemSo,
+				diemGiaoVien: typeof p.diemGiaoVien === 'number' ? p.diemGiaoVien : null,
+				thoiGianDaDung: p.thoiGianDaDung,
+				ngayHoanThanh: p.ngayHoanThanh,
+				loai: p.loai
+			}));
+			
+			const coloringGames = progressList.filter(p => 
+				p.loai === 'troChoi' && p.troChoi && p.troChoi.loai === 'toMau'
+			);
+			const otherItems = progressList.filter(p => 
+				!(p.loai === 'troChoi' && p.troChoi && p.troChoi.loai === 'toMau')
+			);
+			
+			const coloringScores = coloringGames
+				.map(p => p.diemGiaoVien)
+				.filter(s => s !== null);
+			const otherScores = otherItems.map(p => 
+				p.diemGiaoVien !== null ? p.diemGiaoVien : (p.diemSo || 0)
+			);
+			const allScores = [...coloringScores, ...otherScores];
+			const averageScore = allScores.length > 0
+				? Math.round(allScores.reduce((sum, s) => sum + s, 0) / allScores.length)
+				: 0;
+			
 			return {
 				student: {
 					id: student._id,
@@ -333,19 +358,9 @@ const getClassProgress = async (req, res, next) => {
 					ngaySinh: student.ngaySinh,
 					gioiTinh: student.gioiTinh
 				},
-				progress: studentProgressData.map(p => ({
-					id: p._id,
-					baiHoc: p.baiHoc,
-					troChoi: p.troChoi,
-					diemSo: p.diemSo,
-					thoiGianDaDung: p.thoiGianDaDung,
-					ngayHoanThanh: p.ngayHoanThanh,
-					loai: p.loai
-				})),
+				progress: progressList,
 				totalCompleted: studentProgressData.length,
-				averageScore: studentProgressData.length > 0
-					? Math.round(studentProgressData.reduce((sum, p) => sum + p.diemSo, 0) / studentProgressData.length)
-					: 0
+				averageScore: averageScore
 			};
 		});
 		
@@ -394,6 +409,30 @@ const getStudentProgress = async (req, res, next) => {
 		
 		const student = await Child.findById(studentId);
 		
+		const progressList = progress.map(p => ({
+			id: p._id,
+			baiHoc: p.baiHoc,
+			troChoi: p.troChoi,
+			diemSo: p.diemSo,
+			diemGiaoVien: typeof p.diemGiaoVien === 'number' ? p.diemGiaoVien : null,
+			thoiGianDaDung: p.thoiGianDaDung,
+			ngayHoanThanh: p.ngayHoanThanh,
+			cauTraLoi: p.cauTraLoi,
+			loai: p.loai
+		}));
+		
+		const averageScore = progressList.length > 0
+			? Math.round(progressList.reduce((sum, p) => {
+				const isColoring = p.loai === 'troChoi' && p.troChoi && (p.troChoi.loai === 'toMau');
+				if (isColoring) {
+					return sum + (p.diemGiaoVien !== null ? p.diemGiaoVien : 0);
+				} else {
+					const score = p.diemGiaoVien !== null ? p.diemGiaoVien : (p.diemSo || 0);
+					return sum + score;
+				}
+			}, 0) / progressList.length)
+			: 0;
+		
 		res.json({
 			success: true,
 			data: {
@@ -404,20 +443,9 @@ const getStudentProgress = async (req, res, next) => {
 					gioiTinh: student.gioiTinh,
 					phongHoc: student.phongHoc
 				},
-				progress: progress.map(p => ({
-					id: p._id,
-					baiHoc: p.baiHoc,
-					troChoi: p.troChoi,
-					diemSo: p.diemSo,
-					thoiGianDaDung: p.thoiGianDaDung,
-					ngayHoanThanh: p.ngayHoanThanh,
-					cauTraLoi: p.cauTraLoi,
-					loai: p.loai
-				})),
+				progress: progressList,
 				totalCompleted: progress.length,
-				averageScore: progress.length > 0
-					? Math.round(progress.reduce((sum, p) => sum + p.diemSo, 0) / progress.length)
-					: 0
+				averageScore: averageScore
 			}
 		});
 	} catch (e) {
@@ -465,44 +493,14 @@ const exportStudentReport = async (req, res, next) => {
 			.populate('troChoi', 'tieuDe danhMuc loai')
 			.sort({ ngayHoanThanh: -1 });
 
-		let activities = progress.map(p => ({
-			id: (p.baiHoc && p.baiHoc._id) || (p.troChoi && p.troChoi._id) || null,
+		const activities = progress.map(p => ({
 			title: (p.baiHoc && p.baiHoc.tieuDe) || (p.troChoi && p.troChoi.tieuDe) || 'N/A',
 			type: p.loai === 'troChoi' ? 'troChoi' : 'baiHoc',
 			category: (p.baiHoc && p.baiHoc.danhMuc) || (p.troChoi && p.troChoi.danhMuc) || '',
-			score: typeof p.diemSo === 'number' ? p.diemSo : 0,
+			score: p.diemSo || 0,
 			timeSpent: p.thoiGianDaDung || 0,
 			completedAt: p.ngayHoanThanh || p.updatedAt
 		}));
-
-		// include class lessons/games that student hasn't done yet with 0 score
-		const existingIds = new Set(activities.filter(a => a.id).map(a => a.id.toString()));
-		(classData.baiTap || []).forEach(lesson => {
-			if (!existingIds.has(lesson._id.toString())) {
-				activities.push({
-					id: lesson._id,
-					title: lesson.tieuDe || 'N/A',
-					type: 'baiHoc',
-					category: lesson.danhMuc || '',
-					score: 0,
-					timeSpent: 0,
-					completedAt: null
-				});
-			}
-		});
-		(classData.troChoi || []).forEach(game => {
-			if (!existingIds.has(game._id.toString())) {
-				activities.push({
-					id: game._id,
-					title: game.tieuDe || 'N/A',
-					type: 'troChoi',
-					category: game.danhMuc || '',
-					score: 0,
-					timeSpent: 0,
-					completedAt: null
-				});
-			}
-		});
 
 		const outputDir = path.join(__dirname, '..', '..', 'uploads', 'reports');
 		const { filePath, fileName } = await generateStudentReportPdf({
@@ -575,44 +573,14 @@ const sendStudentReportEmail = async (req, res, next) => {
 			.populate('troChoi', 'tieuDe danhMuc loai')
 			.sort({ ngayHoanThanh: -1 });
 
-		let activities = progress.map(p => ({
-			id: (p.baiHoc && p.baiHoc._id) || (p.troChoi && p.troChoi._id) || null,
+		const activities = progress.map(p => ({
 			title: (p.baiHoc && p.baiHoc.tieuDe) || (p.troChoi && p.troChoi.tieuDe) || 'N/A',
 			type: p.loai === 'troChoi' ? 'troChoi' : 'baiHoc',
 			category: (p.baiHoc && p.baiHoc.danhMuc) || (p.troChoi && p.troChoi.danhMuc) || '',
-			score: typeof p.diemSo === 'number' ? p.diemSo : 0,
+			score: p.diemSo || 0,
 			timeSpent: p.thoiGianDaDung || 0,
 			completedAt: p.ngayHoanThanh || p.updatedAt
 		}));
-
-		// include class lessons/games that student hasn't done yet with 0 score
-		const existingIds = new Set(activities.filter(a => a.id).map(a => a.id.toString()));
-		(classData.baiTap || []).forEach(lesson => {
-			if (!existingIds.has(lesson._id.toString())) {
-				activities.push({
-					id: lesson._id,
-					title: lesson.tieuDe || 'N/A',
-					type: 'baiHoc',
-					category: lesson.danhMuc || '',
-					score: 0,
-					timeSpent: 0,
-					completedAt: null
-				});
-			}
-		});
-		(classData.troChoi || []).forEach(game => {
-			if (!existingIds.has(game._id.toString())) {
-				activities.push({
-					id: game._id,
-					title: game.tieuDe || 'N/A',
-					type: 'troChoi',
-					category: game.danhMuc || '',
-					score: 0,
-					timeSpent: 0,
-					completedAt: null
-				});
-			}
-		});
 
 		const outputDir = path.join(__dirname, '..', '..', 'uploads', 'reports');
 		const { filePath, fileName } = await generateStudentReportPdf({
@@ -782,7 +750,10 @@ const getClassLessonsWithStats = async (req, res, next) => {
 				const submittedCount = submittedProgress.length;
 				const notSubmittedCount = totalStudents - submittedCount;
 				const averageScore = submittedCount > 0
-					? Math.round(submittedProgress.reduce((sum, p) => sum + (p.diemSo || 0), 0) / submittedCount)
+					? Math.round(submittedProgress.reduce((sum, p) => {
+						const score = typeof p.diemGiaoVien === 'number' ? p.diemGiaoVien : (p.diemSo || 0);
+						return sum + score;
+					}, 0) / submittedCount)
 					: 0;
 				
 				return {
@@ -813,9 +784,21 @@ const getClassLessonsWithStats = async (req, res, next) => {
 
 				const submittedCount = submittedProgress.length;
 				const notSubmittedCount = totalStudents - submittedCount;
-				const averageScore = submittedCount > 0
-					? Math.round(submittedProgress.reduce((sum, p) => sum + (p.diemSo || 0), 0) / submittedCount)
-					: 0;
+				const isColoringGame = game.loai === 'toMau';
+				let averageScore = 0;
+				if (submittedCount > 0) {
+					if (isColoringGame) {
+						const validScores = submittedProgress.filter(p => typeof p.diemGiaoVien === 'number');
+						if (validScores.length > 0) {
+							averageScore = Math.round(validScores.reduce((sum, p) => sum + (p.diemGiaoVien || 0), 0) / validScores.length);
+						}
+					} else {
+						averageScore = Math.round(submittedProgress.reduce((sum, p) => {
+							const score = typeof p.diemGiaoVien === 'number' ? p.diemGiaoVien : (p.diemSo || 0);
+							return sum + score;
+						}, 0) / submittedCount);
+					}
+				}
 
 				return {
 					id: game._id,

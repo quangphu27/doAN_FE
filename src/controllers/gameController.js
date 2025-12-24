@@ -1154,7 +1154,10 @@ const getGameResults = async (req, res, next) => {
 					submittedCount: submittedStudents.length,
 					notSubmittedCount: notSubmittedStudents.length,
 					averageScore: submittedStudents.length > 0
-						? Math.round(submittedStudents.reduce((sum, s) => sum + s.score, 0) / submittedStudents.length)
+						? Math.round(submittedStudents.reduce((sum, s) => {
+							const score = typeof s.teacherScore === 'number' ? s.teacherScore : s.score;
+							return sum + score;
+						}, 0) / submittedStudents.length)
 						: 0
 				}
 			}
@@ -1217,41 +1220,25 @@ const exportGameResultsReport = async (req, res, next) => {
 			submittedProgress.map(p => [p.treEm._id.toString(), p])
 		);
 
-		// Use teacher's score for coloring games if available
-		const isColoringGameForReport = (game.loai === 'toMau' || game.type === 'coloring');
-
-		// Build results array including students who haven't submitted (system score 0).
-		// Include `teacherScore` property only when teacher has provided a numeric grade.
-		let sumForAverage = 0;
-		const results = allStudents.map(s => {
-			const p = submittedMap.get(s.studentId.toString());
-			const teacherScore = p && typeof p.diemGiaoVien === 'number' ? p.diemGiaoVien : null;
-			const systemScore = p ? (p.diemSo || 0) : 0;
-			const displayScore = isColoringGameForReport && teacherScore !== null ? teacherScore : systemScore;
-
-			sumForAverage += displayScore;
-
-			const resultObj = {
-				studentName: s.studentName,
-				className: s.className,
-				// keep `score` as systemScore so consumers can still access raw system score
-				score: systemScore,
-				timeSpent: p ? (p.thoiGianDaDung || 0) : 0
-			};
-
-			if (teacherScore !== null) {
-				resultObj.teacherScore = teacherScore;
-			}
-
-			return resultObj;
-		});
+		const submittedStudents = allStudents
+			.filter(s => submittedMap.has(s.studentId.toString()))
+			.map(s => {
+				const p = submittedMap.get(s.studentId.toString());
+				return {
+					studentName: s.studentName,
+					className: s.className,
+					score: p.diemSo || 0,
+					teacherScore: typeof p.diemGiaoVien === 'number' ? p.diemGiaoVien : null,
+					timeSpent: p.thoiGianDaDung || 0
+				};
+			});
 
 		const summary = {
 			totalStudents: allStudents.length,
-			submittedCount: submittedProgress.length,
-			notSubmittedCount: allStudents.length - submittedProgress.length,
-			averageScore: allStudents.length > 0
-				? Math.round(sumForAverage / allStudents.length)
+			submittedCount: submittedStudents.length,
+			notSubmittedCount: allStudents.length - submittedStudents.length,
+			averageScore: submittedStudents.length > 0
+				? Math.round(submittedStudents.reduce((sum, s) => sum + (s.score || 0), 0) / submittedStudents.length)
 				: 0
 		};
 
@@ -1264,7 +1251,7 @@ const exportGameResultsReport = async (req, res, next) => {
 				category: game.danhMuc || game.category || ''
 			},
 			summary,
-			results,
+			results: submittedStudents,
 			outputDir
 		});
 
@@ -1343,41 +1330,25 @@ const sendGameResultsReportEmail = async (req, res, next) => {
 			submittedProgress.map(p => [p.treEm._id.toString(), p])
 		);
 
-		// Use teacher's score for coloring games if available
-		const isColoringGameForReport = (game.loai === 'toMau' || game.type === 'coloring');
-
-		// Build results array including students who haven't submitted (system score 0).
-		// Include `teacherScore` property only when teacher has provided a numeric grade.
-		let sumForAverageEmail = 0;
-		const results = allStudents.map(s => {
-			const p = submittedMap.get(s.studentId.toString());
-			const teacherScore = p && typeof p.diemGiaoVien === 'number' ? p.diemGiaoVien : null;
-			const systemScore = p ? (p.diemSo || 0) : 0;
-			const displayScore = isColoringGameForReport && teacherScore !== null ? teacherScore : systemScore;
-
-			sumForAverageEmail += displayScore;
-
-			const resultObj = {
-				studentName: s.studentName,
-				className: s.className,
-				score: systemScore,
-				timeSpent: p ? (p.thoiGianDaDung || 0) : 0
-			};
-
-			if (teacherScore !== null) {
-				resultObj.teacherScore = teacherScore;
-			}
-
-			return resultObj;
-		});
+		const submittedStudents = allStudents
+			.filter(s => submittedMap.has(s.studentId.toString()))
+			.map(s => {
+				const p = submittedMap.get(s.studentId.toString());
+				return {
+					studentName: s.studentName,
+					className: s.className,
+					score: p.diemSo || 0,
+					teacherScore: typeof p.diemGiaoVien === 'number' ? p.diemGiaoVien : null,
+					timeSpent: p.thoiGianDaDung || 0
+				};
+			});
 
 		const summary = {
 			totalStudents: allStudents.length,
-			submittedCount: submittedProgress.length,
-			notSubmittedCount: allStudents.length - submittedProgress.length,
-			// average across all students using teacherScore when available for coloring games
-			averageScore: allStudents.length > 0
-				? Math.round(sumForAverageEmail / allStudents.length)
+			submittedCount: submittedStudents.length,
+			notSubmittedCount: allStudents.length - submittedStudents.length,
+			averageScore: submittedStudents.length > 0
+				? Math.round(submittedStudents.reduce((sum, s) => sum + (s.score || 0), 0) / submittedStudents.length)
 				: 0
 		};
 
@@ -1390,7 +1361,7 @@ const sendGameResultsReportEmail = async (req, res, next) => {
 				category: game.danhMuc || game.category || ''
 			},
 			summary,
-			results,
+			results: submittedStudents,
 			outputDir
 		});
 

@@ -615,6 +615,9 @@ const getLessonResults = async (req, res, next) => {
 					classId: student.classId,
 					className: student.className,
 					score: progress.diemSo || 0,
+					teacherScore: typeof progress.diemGiaoVien === 'number' ? progress.diemGiaoVien : null,
+					gradingStatus: progress.trangThaiChamDiem || 'chuaCham',
+					progressId: progress._id,
 					timeSpent: progress.thoiGianDaDung || 0,
 					completedAt: progress.ngayHoanThanh || progress.updatedAt,
 					attempts: progress.soLanThu || 1,
@@ -622,7 +625,7 @@ const getLessonResults = async (req, res, next) => {
 						const exInfo = exerciseMap.get(answer.idBaiTap);
 						const fallbackLabel = `Câu ${idx + 1}`;
 						return {
-							exerciseId: answer.idBaiTap, // giữ id kỹ thuật
+							exerciseId: answer.idBaiTap,
 							displayId: exInfo?.label || fallbackLabel,
 							questionLabel: exInfo?.label || fallbackLabel,
 							questionText: exInfo?.text || '',
@@ -655,7 +658,10 @@ const getLessonResults = async (req, res, next) => {
 					submittedCount: submittedStudents.length,
 					notSubmittedCount: notSubmittedStudents.length,
 					averageScore: submittedStudents.length > 0
-						? Math.round(submittedStudents.reduce((sum, s) => sum + s.score, 0) / submittedStudents.length)
+						? Math.round(submittedStudents.reduce((sum, s) => {
+							const score = typeof s.teacherScore === 'number' ? s.teacherScore : s.score;
+							return sum + score;
+						}, 0) / submittedStudents.length)
 						: 0
 				}
 			}
