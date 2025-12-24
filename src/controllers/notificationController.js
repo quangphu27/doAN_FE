@@ -252,24 +252,56 @@ const sendNotificationToAll = async (req, res, next) => {
 			type: Joi.string().valid('reminder', 'summary', 'achievement', 'system', 'schedule').required(),
 			title: Joi.string().required(),
 			content: Joi.string().required(),
-			targetRole: Joi.string().valid('all', 'parent', 'child').optional(),
+			targetRole: Joi.alternatives().try(
+				Joi.string().valid('all', 'parent', 'child', 'teacher', 'teacher,parent', 'parent,teacher'),
+				Joi.array().items(Joi.string().valid('parent', 'child', 'teacher'))
+			).optional(),
 			scheduledAt: Joi.date().optional()
 		});
 		
 		const { type, title, content, targetRole = 'all', scheduledAt } = await schema.validateAsync(req.body);
 		
 		let users;
-		if (targetRole === 'all') {
-			users = await User.find({ trangThai: true });
-		} else if (targetRole === 'parent') {
-			users = await User.find({ vaiTro: 'phuHuynh', trangThai: true });
-		} else if (targetRole === 'child') {
-			users = await User.find({ vaiTro: 'hocSinh', trangThai: true });
-		} else {
-			users = await User.find({ vaiTro: targetRole, trangThai: true });
+		let targetRoles = [];
+		
+		if (Array.isArray(targetRole)) {
+			targetRoles = targetRole.map(r => {
+				if (r === 'parent') return 'phuHuynh';
+				if (r === 'teacher') return 'giaoVien';
+				if (r === 'child') return 'hocSinh';
+				return r;
+			});
+		} else if (typeof targetRole === 'string') {
+			if (targetRole === 'all') {
+				targetRoles = ['phuHuynh', 'giaoVien', 'hocSinh'];
+			} else if (targetRole.includes(',')) {
+				targetRoles = targetRole.split(',').map(r => {
+					if (r.trim() === 'parent') return 'phuHuynh';
+					if (r.trim() === 'teacher') return 'giaoVien';
+					if (r.trim() === 'child') return 'hocSinh';
+					return r.trim();
+				});
+			} else {
+				if (targetRole === 'parent') targetRoles = ['phuHuynh'];
+				else if (targetRole === 'teacher') targetRoles = ['giaoVien'];
+				else if (targetRole === 'child') targetRoles = ['hocSinh'];
+				else targetRoles = [targetRole];
+			}
 		}
 		
-		// Map type từ frontend sang model
+		if (targetRoles.length > 0) {
+			users = await User.find({ vaiTro: { $in: targetRoles }, trangThai: true });
+		} else {
+			users = await User.find({ trangThai: true });
+		}
+		
+		if (!users || users.length === 0) {
+			return res.status(400).json({ 
+				success: false, 
+				message: 'Không tìm thấy người dùng nào phù hợp' 
+			});
+		}
+		
 		const loaiMap = {
 			'reminder': 'nhacNho',
 			'summary': 'tomTat',
@@ -287,18 +319,35 @@ const sendNotificationToAll = async (req, res, next) => {
 			ngayGui: scheduledAt || new Date()
 		}));
 		
-		await ThongBao.insertMany(notifications);
+		if (notifications.length > 0) {
+			await ThongBao.insertMany(notifications);
+		}
 		
 		const NotificationHistory = require('../models/LichSuThongBao');
+		const targetRoleString = Array.isArray(targetRole) ? targetRole.join(',') : targetRole;
+		
+		let vaiTroNhan = 'tatCa';
+		if (targetRoleString !== 'all') {
+			if (targetRoles.includes('phuHuynh') && targetRoles.includes('giaoVien')) {
+				vaiTroNhan = 'tatCa';
+			} else if (targetRoles.includes('phuHuynh')) {
+				vaiTroNhan = 'phuHuynh';
+			} else if (targetRoles.includes('giaoVien')) {
+				vaiTroNhan = 'giaoVien';
+			} else if (targetRoles.includes('hocSinh')) {
+				vaiTroNhan = 'hocSinh';
+			}
+		}
+		
 		await NotificationHistory.create({
-			sentBy: req.user.id,
-			type,
-			title,
-			content,
-			targetRole,
-			recipientCount: users.length,
-			scheduledAt: scheduledAt || new Date(),
-			status: 'sent'
+			nguoiGui: req.user.id,
+			loai: loaiMap[type] || type,
+			tieuDe: title,
+			noiDung: content,
+			vaiTroNhan: vaiTroNhan,
+			soLuongNhan: users.length,
+			ngayLapLich: scheduledAt || new Date(),
+			trangThai: 'daGui'
 		});
 		
 		res.json({ 
@@ -307,6 +356,7 @@ const sendNotificationToAll = async (req, res, next) => {
 			data: { count: users.length }
 		});
 	} catch (e) {
+		console.error('Error in sendNotificationToAll:', e);
 		next(e);
 	}
 };
@@ -314,9 +364,25 @@ const sendNotificationToAll = async (req, res, next) => {
 const getNotificationHistory = async (req, res, next) => {
 	try {
 		const { page = 1, limit = 20, type, status } = req.query;
-		const filter = { sentBy: req.user.id };
-		if (type) filter.type = type;
-		if (status) filter.status = status;
+		const filter = { nguoiGui: req.user.id };
+		if (type) {
+			const loaiMap = {
+				'reminder': 'nhacNho',
+				'summary': 'tomTat',
+				'achievement': 'thanhTich',
+				'system': 'heThong',
+				'schedule': 'lichHoc'
+			};
+			filter.loai = loaiMap[type] || type;
+		}
+		if (status) {
+			const statusMap = {
+				'sent': 'daGui',
+				'scheduled': 'daLapLich',
+				'failed': 'thatBai'
+			};
+			filter.trangThai = statusMap[status] || status;
+		}
 
 		const NotificationHistory = require('../models/LichSuThongBao');
 		const history = await NotificationHistory.find(filter)
@@ -326,10 +392,29 @@ const getNotificationHistory = async (req, res, next) => {
 
 		const total = await NotificationHistory.countDocuments(filter);
 
+		const mappedHistory = history.map(item => ({
+			id: item._id,
+			_id: item._id,
+			type: item.loai === 'nhacNho' ? 'reminder' :
+			      item.loai === 'tomTat' ? 'summary' :
+			      item.loai === 'thanhTich' ? 'achievement' :
+			      item.loai === 'heThong' ? 'system' : 'schedule',
+			title: item.tieuDe,
+			content: item.noiDung,
+			targetRole: item.vaiTroNhan === 'tatCa' ? 'all' :
+			           item.vaiTroNhan === 'phuHuynh' ? 'parent' :
+			           item.vaiTroNhan === 'giaoVien' ? 'teacher' : 'child',
+			recipientCount: item.soLuongNhan,
+			status: item.trangThai === 'daGui' ? 'sent' :
+			        item.trangThai === 'daLapLich' ? 'scheduled' : 'failed',
+			scheduledAt: item.ngayLapLich || item.createdAt,
+			createdAt: item.createdAt
+		}));
+
 		res.json({
 			success: true,
 			data: {
-				history,
+				history: mappedHistory,
 				pagination: {
 					total,
 					page: parseInt(page),

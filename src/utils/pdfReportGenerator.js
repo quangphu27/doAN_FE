@@ -259,10 +259,14 @@ const generateStudentReportPdf = async ({ student, activities, outputDir }) => {
 				doc.restore();
 			}
 
-			// Prefer teacherScore for games; if teacherScore explicitly null -> blank
 			let displayScore;
-			if (a.type === 'troChoi' && Object.prototype.hasOwnProperty.call(a, 'teacherScore')) {
-				displayScore = a.teacherScore === null ? '' : String(a.teacherScore);
+			const isColoringGame = a.type === 'troChoi' && a.gameType === 'toMau';
+			if (isColoringGame && Object.prototype.hasOwnProperty.call(a, 'teacherScore')) {
+				if (a.teacherScore === null || a.teacherScore === undefined) {
+					displayScore = 'Chưa chấm điểm';
+				} else {
+					displayScore = String(a.teacherScore);
+				}
 			} else {
 				const scoreVal = typeof a.score === 'number' ? a.score : 0;
 				displayScore = String(scoreVal);

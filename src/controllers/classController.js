@@ -296,7 +296,9 @@ const getClassProgress = async (req, res, next) => {
 		const classId = req.params.id;
 		
 		const classData = await Class.findById(classId)
-			.populate('hocSinh', 'hoTen ngaySinh gioiTinh');
+			.populate('hocSinh', 'hoTen ngaySinh gioiTinh')
+			.populate('baiTap', '_id')
+			.populate('troChoi', '_id');
 		
 		if (!classData) {
 			return res.status(404).json({ success: false, message: 'Không tìm thấy lớp' });
@@ -308,15 +310,33 @@ const getClassProgress = async (req, res, next) => {
 		}
 		
 		const studentIds = classData.hocSinh.map(s => s._id);
+		const lessonIds = (classData.baiTap || []).map(l => l._id);
+		const gameIds = (classData.troChoi || []).map(g => g._id);
 		
-		const progress = await Progress.find({
-			treEm: { $in: studentIds },
-			trangThai: 'hoanThanh'
-		})
-			.populate('treEm', 'hoTen phongHoc')
-			.populate('baiHoc', 'tieuDe danhMuc capDo')
-			.populate('troChoi', 'tieuDe loai danhMuc')
-			.sort({ ngayHoanThanh: -1 });
+		let progress = [];
+		
+		if (lessonIds.length > 0 || gameIds.length > 0) {
+			const progressQuery = {
+				treEm: { $in: studentIds },
+				trangThai: 'hoanThanh'
+			};
+			
+			const orConditions = [];
+			if (lessonIds.length > 0) {
+				orConditions.push({ baiHoc: { $in: lessonIds } });
+			}
+			if (gameIds.length > 0) {
+				orConditions.push({ troChoi: { $in: gameIds } });
+			}
+			if (orConditions.length > 0) {
+				progressQuery.$or = orConditions;
+				progress = await Progress.find(progressQuery)
+					.populate('treEm', 'hoTen phongHoc')
+					.populate('baiHoc', 'tieuDe danhMuc capDo')
+					.populate('troChoi', 'tieuDe loai danhMuc')
+					.sort({ ngayHoanThanh: -1 });
+			}
+		}
 		
 		const studentProgress = studentIds.map(studentId => {
 			const student = classData.hocSinh.find(s => s._id.toString() === studentId.toString());
@@ -385,7 +405,9 @@ const getStudentProgress = async (req, res, next) => {
 		const classId = req.params.id;
 		const studentId = req.params.studentId;
 		
-		const classData = await Class.findById(classId);
+		const classData = await Class.findById(classId)
+			.populate('baiTap', '_id')
+			.populate('troChoi', '_id');
 		if (!classData) {
 			return res.status(404).json({ success: false, message: 'Không tìm thấy lớp' });
 		}
@@ -399,13 +421,32 @@ const getStudentProgress = async (req, res, next) => {
 			return res.status(400).json({ success: false, message: 'Học sinh không thuộc lớp này' });
 		}
 		
-		const progress = await Progress.find({
-			treEm: studentId,
-			trangThai: 'hoanThanh'
-		})
-			.populate('baiHoc', 'tieuDe danhMuc capDo moTa')
-			.populate('troChoi', 'tieuDe loai danhMuc moTa')
-			.sort({ ngayHoanThanh: -1 });
+		const lessonIds = (classData.baiTap || []).map(l => l._id);
+		const gameIds = (classData.troChoi || []).map(g => g._id);
+		
+		let progress = [];
+		
+		if (lessonIds.length > 0 || gameIds.length > 0) {
+			const progressQuery = {
+				treEm: studentId,
+				trangThai: 'hoanThanh'
+			};
+			
+			const orConditions = [];
+			if (lessonIds.length > 0) {
+				orConditions.push({ baiHoc: { $in: lessonIds } });
+			}
+			if (gameIds.length > 0) {
+				orConditions.push({ troChoi: { $in: gameIds } });
+			}
+			if (orConditions.length > 0) {
+				progressQuery.$or = orConditions;
+				progress = await Progress.find(progressQuery)
+					.populate('baiHoc', 'tieuDe danhMuc capDo moTa')
+					.populate('troChoi', 'tieuDe loai danhMuc moTa')
+					.sort({ ngayHoanThanh: -1 });
+			}
+		}
 		
 		const student = await Child.findById(studentId);
 		
@@ -466,7 +507,9 @@ const exportStudentReport = async (req, res, next) => {
 		}
 
 		const teacher = await User.findById(req.user.id || req.user._id).select('email hoTen');
-		const classData = await Class.findById(classId);
+		const classData = await Class.findById(classId)
+			.populate('baiTap', '_id')
+			.populate('troChoi', '_id');
 		if (!classData) {
 			return res.status(404).json({ success: false, message: 'Không tìm thấy lớp' });
 		}
@@ -485,22 +528,48 @@ const exportStudentReport = async (req, res, next) => {
 			return res.status(404).json({ success: false, message: 'Không tìm thấy học sinh' });
 		}
 
-		const progress = await Progress.find({
-			treEm: studentId,
-			trangThai: 'hoanThanh'
-		})
-			.populate('baiHoc', 'tieuDe danhMuc')
-			.populate('troChoi', 'tieuDe danhMuc loai')
-			.sort({ ngayHoanThanh: -1 });
+		const lessonIds = (classData.baiTap || []).map(l => l._id);
+		const gameIds = (classData.troChoi || []).map(g => g._id);
+		
+		let progress = [];
+		
+		if (lessonIds.length > 0 || gameIds.length > 0) {
+			const progressQuery = {
+				treEm: studentId,
+				trangThai: 'hoanThanh'
+			};
+			
+			const orConditions = [];
+			if (lessonIds.length > 0) {
+				orConditions.push({ baiHoc: { $in: lessonIds } });
+			}
+			if (gameIds.length > 0) {
+				orConditions.push({ troChoi: { $in: gameIds } });
+			}
+			if (orConditions.length > 0) {
+				progressQuery.$or = orConditions;
+				progress = await Progress.find(progressQuery)
+					.populate('baiHoc', 'tieuDe danhMuc')
+					.populate('troChoi', 'tieuDe danhMuc loai')
+					.sort({ ngayHoanThanh: -1 });
+			}
+		}
 
-		const activities = progress.map(p => ({
-			title: (p.baiHoc && p.baiHoc.tieuDe) || (p.troChoi && p.troChoi.tieuDe) || 'N/A',
-			type: p.loai === 'troChoi' ? 'troChoi' : 'baiHoc',
-			category: (p.baiHoc && p.baiHoc.danhMuc) || (p.troChoi && p.troChoi.danhMuc) || '',
-			score: p.diemSo || 0,
-			timeSpent: p.thoiGianDaDung || 0,
-			completedAt: p.ngayHoanThanh || p.updatedAt
-		}));
+		const activities = progress.map(p => {
+			const isColoringGame = p.loai === 'troChoi' && p.troChoi && p.troChoi.loai === 'toMau';
+			const teacherScore = typeof p.diemGiaoVien === 'number' ? p.diemGiaoVien : null;
+			
+			return {
+				title: (p.baiHoc && p.baiHoc.tieuDe) || (p.troChoi && p.troChoi.tieuDe) || 'N/A',
+				type: p.loai === 'troChoi' ? 'troChoi' : 'baiHoc',
+				category: (p.baiHoc && p.baiHoc.danhMuc) || (p.troChoi && p.troChoi.danhMuc) || '',
+				gameType: p.troChoi ? p.troChoi.loai : undefined,
+				score: isColoringGame ? (teacherScore !== null ? teacherScore : (p.diemSo || 0)) : (p.diemSo || 0),
+				teacherScore: isColoringGame ? teacherScore : undefined,
+				timeSpent: p.thoiGianDaDung || 0,
+				completedAt: p.ngayHoanThanh || p.updatedAt
+			};
+		});
 
 		const outputDir = path.join(__dirname, '..', '..', 'uploads', 'reports');
 		const { filePath, fileName } = await generateStudentReportPdf({
@@ -546,7 +615,9 @@ const sendStudentReportEmail = async (req, res, next) => {
 			});
 		}
 
-		const classData = await Class.findById(classId);
+		const classData = await Class.findById(classId)
+			.populate('baiTap', '_id')
+			.populate('troChoi', '_id');
 		if (!classData) {
 			return res.status(404).json({ success: false, message: 'Không tìm thấy lớp' });
 		}
@@ -565,22 +636,48 @@ const sendStudentReportEmail = async (req, res, next) => {
 			return res.status(404).json({ success: false, message: 'Không tìm thấy học sinh' });
 		}
 
-		const progress = await Progress.find({
-			treEm: studentId,
-			trangThai: 'hoanThanh'
-		})
-			.populate('baiHoc', 'tieuDe danhMuc')
-			.populate('troChoi', 'tieuDe danhMuc loai')
-			.sort({ ngayHoanThanh: -1 });
+		const lessonIds = (classData.baiTap || []).map(l => l._id);
+		const gameIds = (classData.troChoi || []).map(g => g._id);
+		
+		let progress = [];
+		
+		if (lessonIds.length > 0 || gameIds.length > 0) {
+			const progressQuery = {
+				treEm: studentId,
+				trangThai: 'hoanThanh'
+			};
+			
+			const orConditions = [];
+			if (lessonIds.length > 0) {
+				orConditions.push({ baiHoc: { $in: lessonIds } });
+			}
+			if (gameIds.length > 0) {
+				orConditions.push({ troChoi: { $in: gameIds } });
+			}
+			if (orConditions.length > 0) {
+				progressQuery.$or = orConditions;
+				progress = await Progress.find(progressQuery)
+					.populate('baiHoc', 'tieuDe danhMuc')
+					.populate('troChoi', 'tieuDe danhMuc loai')
+					.sort({ ngayHoanThanh: -1 });
+			}
+		}
 
-		const activities = progress.map(p => ({
-			title: (p.baiHoc && p.baiHoc.tieuDe) || (p.troChoi && p.troChoi.tieuDe) || 'N/A',
-			type: p.loai === 'troChoi' ? 'troChoi' : 'baiHoc',
-			category: (p.baiHoc && p.baiHoc.danhMuc) || (p.troChoi && p.troChoi.danhMuc) || '',
-			score: p.diemSo || 0,
-			timeSpent: p.thoiGianDaDung || 0,
-			completedAt: p.ngayHoanThanh || p.updatedAt
-		}));
+		const activities = progress.map(p => {
+			const isColoringGame = p.loai === 'troChoi' && p.troChoi && p.troChoi.loai === 'toMau';
+			const teacherScore = typeof p.diemGiaoVien === 'number' ? p.diemGiaoVien : null;
+			
+			return {
+				title: (p.baiHoc && p.baiHoc.tieuDe) || (p.troChoi && p.troChoi.tieuDe) || 'N/A',
+				type: p.loai === 'troChoi' ? 'troChoi' : 'baiHoc',
+				category: (p.baiHoc && p.baiHoc.danhMuc) || (p.troChoi && p.troChoi.danhMuc) || '',
+				gameType: p.troChoi ? p.troChoi.loai : undefined,
+				score: isColoringGame ? (teacherScore !== null ? teacherScore : (p.diemSo || 0)) : (p.diemSo || 0),
+				teacherScore: isColoringGame ? teacherScore : undefined,
+				timeSpent: p.thoiGianDaDung || 0,
+				completedAt: p.ngayHoanThanh || p.updatedAt
+			};
+		});
 
 		const outputDir = path.join(__dirname, '..', '..', 'uploads', 'reports');
 		const { filePath, fileName } = await generateStudentReportPdf({
