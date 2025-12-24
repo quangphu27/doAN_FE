@@ -17,7 +17,7 @@ const canManageSession = (req, res, next) => {
 	const isParent = role === 'phuHuynh' || role === 'parent';
 	const isAdmin = role === 'admin';
 
-	if (isChild && req.body.childId === req.user.id) {
+	if (isChild) {
 		return next();
 	}
 	if (isParent || isAdmin) {
@@ -25,7 +25,6 @@ const canManageSession = (req, res, next) => {
 	}
 	return res.status(403).json({ success: false, message: 'Unauthorized' });
 };
-// tuong ưng day la cac route ơ bacnend ma frontend goi toi - phần endpoint route 
 router.post('/start', canManageSession, startSession);// Canmangesession (middleware chỉ ai có quyen child moi duoc vao)
 router.post('/end', canManageSession, endSession);
 

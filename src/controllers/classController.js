@@ -215,7 +215,9 @@ const addStudent = async (req, res, next) => {
 		const value = await schema.validateAsync(req.body);
 		const classId = req.params.id;
 		
-		const classData = await Class.findById(classId);
+		const classData = await Class.findById(classId)
+			.populate('baiTap', 'tieuDe danhMuc')
+			.populate('troChoi', 'tieuDe danhMuc');
 		if (!classData) {
 			return res.status(404).json({ success: false, message: 'Không tìm thấy lớp' });
 		}
@@ -230,15 +232,11 @@ const addStudent = async (req, res, next) => {
 			return res.status(400).json({ success: false, message: 'Không tìm thấy học sinh với email này' });
 		}
 		
-		let child = await Child.findOne({ phuHuynh: studentUser._id });
+		const child = await Child.findById(studentUser._id);
 		if (!child) {
-			child = await Child.create({
-				hoTen: studentUser.hoTen,
-				phuHuynh: studentUser._id,
-				gioiTinh: studentUser.thongTinCaNhan?.gioiTinh || 'nam',
-				ngaySinh: studentUser.thongTinCaNhan?.ngaySinh,
-				capDoHocTap: 'coBan',
-				trangThai: true
+			return res.status(400).json({ 
+				success: false, 
+				message: 'Trẻ này chưa được phụ huynh thêm vào hệ thống. Vui lòng yêu cầu phụ huynh thêm trẻ trước.' 
 			});
 		}
 		
@@ -268,7 +266,9 @@ const removeStudent = async (req, res, next) => {
 		const classId = req.params.id;
 		const studentId = req.params.studentId;
 		
-		const classData = await Class.findById(classId);
+		const classData = await Class.findById(classId)
+			.populate('baiTap', 'tieuDe danhMuc')
+			.populate('troChoi', 'tieuDe danhMuc');
 		if (!classData) {
 			return res.status(404).json({ success: false, message: 'Không tìm thấy lớp' });
 		}
@@ -465,14 +465,44 @@ const exportStudentReport = async (req, res, next) => {
 			.populate('troChoi', 'tieuDe danhMuc loai')
 			.sort({ ngayHoanThanh: -1 });
 
-		const activities = progress.map(p => ({
+		let activities = progress.map(p => ({
+			id: (p.baiHoc && p.baiHoc._id) || (p.troChoi && p.troChoi._id) || null,
 			title: (p.baiHoc && p.baiHoc.tieuDe) || (p.troChoi && p.troChoi.tieuDe) || 'N/A',
 			type: p.loai === 'troChoi' ? 'troChoi' : 'baiHoc',
 			category: (p.baiHoc && p.baiHoc.danhMuc) || (p.troChoi && p.troChoi.danhMuc) || '',
-			score: p.diemSo || 0,
+			score: typeof p.diemSo === 'number' ? p.diemSo : 0,
 			timeSpent: p.thoiGianDaDung || 0,
 			completedAt: p.ngayHoanThanh || p.updatedAt
 		}));
+
+		// include class lessons/games that student hasn't done yet with 0 score
+		const existingIds = new Set(activities.filter(a => a.id).map(a => a.id.toString()));
+		(classData.baiTap || []).forEach(lesson => {
+			if (!existingIds.has(lesson._id.toString())) {
+				activities.push({
+					id: lesson._id,
+					title: lesson.tieuDe || 'N/A',
+					type: 'baiHoc',
+					category: lesson.danhMuc || '',
+					score: 0,
+					timeSpent: 0,
+					completedAt: null
+				});
+			}
+		});
+		(classData.troChoi || []).forEach(game => {
+			if (!existingIds.has(game._id.toString())) {
+				activities.push({
+					id: game._id,
+					title: game.tieuDe || 'N/A',
+					type: 'troChoi',
+					category: game.danhMuc || '',
+					score: 0,
+					timeSpent: 0,
+					completedAt: null
+				});
+			}
+		});
 
 		const outputDir = path.join(__dirname, '..', '..', 'uploads', 'reports');
 		const { filePath, fileName } = await generateStudentReportPdf({
@@ -545,14 +575,44 @@ const sendStudentReportEmail = async (req, res, next) => {
 			.populate('troChoi', 'tieuDe danhMuc loai')
 			.sort({ ngayHoanThanh: -1 });
 
-		const activities = progress.map(p => ({
+		let activities = progress.map(p => ({
+			id: (p.baiHoc && p.baiHoc._id) || (p.troChoi && p.troChoi._id) || null,
 			title: (p.baiHoc && p.baiHoc.tieuDe) || (p.troChoi && p.troChoi.tieuDe) || 'N/A',
 			type: p.loai === 'troChoi' ? 'troChoi' : 'baiHoc',
 			category: (p.baiHoc && p.baiHoc.danhMuc) || (p.troChoi && p.troChoi.danhMuc) || '',
-			score: p.diemSo || 0,
+			score: typeof p.diemSo === 'number' ? p.diemSo : 0,
 			timeSpent: p.thoiGianDaDung || 0,
 			completedAt: p.ngayHoanThanh || p.updatedAt
 		}));
+
+		// include class lessons/games that student hasn't done yet with 0 score
+		const existingIds = new Set(activities.filter(a => a.id).map(a => a.id.toString()));
+		(classData.baiTap || []).forEach(lesson => {
+			if (!existingIds.has(lesson._id.toString())) {
+				activities.push({
+					id: lesson._id,
+					title: lesson.tieuDe || 'N/A',
+					type: 'baiHoc',
+					category: lesson.danhMuc || '',
+					score: 0,
+					timeSpent: 0,
+					completedAt: null
+				});
+			}
+		});
+		(classData.troChoi || []).forEach(game => {
+			if (!existingIds.has(game._id.toString())) {
+				activities.push({
+					id: game._id,
+					title: game.tieuDe || 'N/A',
+					type: 'troChoi',
+					category: game.danhMuc || '',
+					score: 0,
+					timeSpent: 0,
+					completedAt: null
+				});
+			}
+		});
 
 		const outputDir = path.join(__dirname, '..', '..', 'uploads', 'reports');
 		const { filePath, fileName } = await generateStudentReportPdf({

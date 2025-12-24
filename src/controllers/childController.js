@@ -50,28 +50,42 @@ const createChild = async (req, res, next) => {
 			});
 		}
 		
-		const User = require('../models/NguoiDung');
-		const existingUser = await User.findOne({ email: value.email, vaiTro: 'hocSinh' });
-		
-		if (existingUser && value.email) {
-			const existingChild = await Child.findOne({ phuHuynh: req.user.id });
+		if (value.email) {
+			const User = require('../models/NguoiDung');
+			const existingUser = await User.findOne({ email: value.email, vaiTro: 'hocSinh' });
 			
-			if (existingChild) {
-				if (existingChild.phuHuynh.toString() === req.user.id) {
-					return res.status(400).json({
-						success: false,
-						message: 'Trẻ này đã được thêm vào tài khoản của bạn'
-					});
-				}
-				
-				if (existingChild.phuHuynh && existingChild.phuHuynh.toString() !== req.user.id) {
-					return res.status(400).json({
-						success: false,
-						message: 'Trẻ này đã được thêm vào tài khoản phụ huynh khác'
-					});
-				}
+			if (!existingUser) {
+				return res.status(400).json({
+					success: false,
+					message: 'Không tìm thấy trẻ với email này'
+				});
 			}
 			
+			const existingChildForThisParent = await Child.findOne({ 
+				_id: existingUser._id, 
+				phuHuynh: req.user.id 
+			});
+			
+			if (existingChildForThisParent) {
+				return res.status(400).json({
+					success: false,
+					message: 'Trẻ này đã được thêm vào tài khoản của bạn'
+				});
+			}
+			
+			// Kiểm tra xem trẻ này đã được gắn vào phụ huynh khác chưa
+			const existingChildForOtherParent = await Child.findOne({ 
+				_id: existingUser._id 
+			});
+			
+			if (existingChildForOtherParent && existingChildForOtherParent.phuHuynh.toString() !== req.user.id) {
+				return res.status(400).json({
+					success: false,
+					message: 'Trẻ này đã được thêm vào tài khoản phụ huynh khác'
+				});
+			}
+			
+			// Gắn trẻ vào phụ huynh này
 			const childData = {
 				_id: existingUser._id,
 				hoTen: value.hoTen,
@@ -85,9 +99,11 @@ const createChild = async (req, res, next) => {
 			};
 			
 			let child;
-			if (existingChild) {
-				child = await Child.findByIdAndUpdate(existingChild._id, childData, { new: true });
+			if (existingChildForOtherParent) {
+				// Cập nhật trẻ hiện có
+				child = await Child.findByIdAndUpdate(existingChildForOtherParent._id, childData, { new: true });
 			} else {
+				// Tạo mới trẻ
 				child = await Child.create(childData);
 			}
 			

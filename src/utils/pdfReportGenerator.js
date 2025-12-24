@@ -22,8 +22,15 @@ const generateItemResultReportPdf = async ({ item, summary, results, outputDir }
 	return new Promise((resolve, reject) => {
 		const doc = new PDFDocument({ margin: 40 });
 		const fontPath = path.join(__dirname, '..', 'fonts', 'DejaVuSans.ttf');
-		if (fs.existsSync(fontPath)) {
-			doc.font(fontPath);
+		const mainFont = fs.existsSync(fontPath) ? fontPath : null;
+		if (mainFont) {
+			try {
+				doc.registerFont('DejaVu', mainFont);
+				doc.registerFont('DejaVu-Bold', mainFont);
+				doc.font('DejaVu');
+			} catch (err) {
+				doc.font(mainFont);
+			}
 		}
 		const stream = fs.createWriteStream(filePath);
 
@@ -56,17 +63,21 @@ const generateItemResultReportPdf = async ({ item, summary, results, outputDir }
 			.text(`- Tổng số học sinh: ${summary.totalStudents}`)
 			.text(`- Số học sinh đã nộp: ${summary.submittedCount}`)
 			.text(`- Số học sinh chưa nộp: ${summary.notSubmittedCount}`)
-			.text(`- Điểm trung bình: ${summary.averageScore}%`);
+			.text(`- Điểm trung bình: ${summary.averageScore}`);
 
 		doc.moveDown();
 		doc.fontSize(12).text('Chi tiết học sinh:', { underline: true });
 		doc.moveDown(0.5);
 
-		const headers = ['STT', 'Họ và tên', 'Lớp', 'Điểm', 'Điểm GV', 'Thời gian'];
-		const colWidths = [40, 170, 100, 60, 70, 80];
+		const headers = ['STT', 'Họ và tên', 'Lớp', 'Điểm', 'Thời gian'];
+		const colWidths = [40, 200, 120, 80, 80];
 		const startX = doc.x;
 		let y = doc.y;
 
+		// Header styling
+		if (mainFont) {
+			try { doc.font('DejaVu-Bold'); } catch { doc.font(mainFont); }
+		}
 		doc.fontSize(10);
 		headers.forEach((h, i) => {
 			doc.text(h, startX + colWidths.slice(0, i).reduce((a, b) => a + b, 0) + 2, y, {
@@ -76,6 +87,7 @@ const generateItemResultReportPdf = async ({ item, summary, results, outputDir }
 		});
 
 		y += 18;
+		// draw header separator
 		doc.moveTo(startX, y - 4).lineTo(startX + colWidths.reduce((a, b) => a + b, 0), y - 4).stroke();
 
 		const formatTime = (seconds = 0) => {
@@ -84,23 +96,40 @@ const generateItemResultReportPdf = async ({ item, summary, results, outputDir }
 			return `${m}p${String(s).padStart(2, '0')}s`;
 		};
 
+		// Rows (alternating background)
 		results.forEach((r, idx) => {
-			if (y > doc.page.height - 80) {
+			if (y > doc.page.height - 100) {
 				doc.addPage();
 				y = doc.y;
 			}
 
-			const row = [
-				String(idx + 1),
-				r.studentName || '',
-				r.className || '',
-				typeof r.score === 'number' ? `${r.score}%` : '',
-				typeof r.teacherScore === 'number' ? `${r.teacherScore}%` : '',
-				formatTime(r.timeSpent || 0)
-			];
+			const rowHeight = 16;
+			const rowY = y - 2;
 
+			if (idx % 2 === 0) {
+				doc.save();
+				doc.rect(startX, rowY, colWidths.reduce((a, b) => a + b, 0), rowHeight).fill('#f7f7f7');
+				doc.restore();
+			}
+				let displayScore;
+				if (Object.prototype.hasOwnProperty.call(r, 'teacherScore')) {
+					displayScore = r.teacherScore === null ? '' : String(r.teacherScore);
+				} else {
+					const scoreVal = typeof r.score === 'number' ? r.score : 0;
+					displayScore = String(scoreVal);
+				}
+
+				const row = [
+					String(idx + 1),
+					r.studentName || '',
+					r.className || '',
+					displayScore,
+					formatTime(r.timeSpent || 0)
+				];
+
+			if (mainFont) { try { doc.font('DejaVu'); } catch { doc.font(mainFont); } }
 			row.forEach((cell, i) => {
-				doc.text(
+				doc.fillColor('black').text(
 					cell,
 					startX + colWidths.slice(0, i).reduce((a, b) => a + b, 0) + 2,
 					y,
@@ -111,13 +140,13 @@ const generateItemResultReportPdf = async ({ item, summary, results, outputDir }
 				);
 			});
 
-			y += 16;
+			y += rowHeight;
 		});
-
 		doc.moveDown();
-		doc.fontSize(9).text(`Ngày tạo báo cáo: ${new Date().toLocaleString('vi-VN')}`, {
-			align: 'right'
-		});
+		const now1 = new Date();
+		const dateStr1 = `${now1.toLocaleTimeString('vi-VN')} ${now1.toLocaleDateString('vi-VN')}`;
+		const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+		doc.fontSize(9).text(`Ngày tạo báo cáo: ${dateStr1}`, doc.page.margins.left, doc.y, { width: pageWidth, align: 'right' });
 
 		doc.end();
 
@@ -150,8 +179,15 @@ const generateStudentReportPdf = async ({ student, activities, outputDir }) => {
 	return new Promise((resolve, reject) => {
 		const doc = new PDFDocument({ margin: 40 });
 		const fontPath = path.join(__dirname, '..', 'fonts', 'DejaVuSans.ttf');
-		if (fs.existsSync(fontPath)) {
-			doc.font(fontPath);
+		const mainFont = fs.existsSync(fontPath) ? fontPath : null;
+		if (mainFont) {
+			try {
+				doc.registerFont('DejaVu', mainFont);
+				doc.registerFont('DejaVu-Bold', mainFont);
+				doc.font('DejaVu');
+			} catch (err) {
+				doc.font(mainFont);
+			}
 		}
 		const stream = fs.createWriteStream(filePath);
 		doc.pipe(stream);
@@ -170,17 +206,18 @@ const generateStudentReportPdf = async ({ student, activities, outputDir }) => {
 		doc.moveDown(0.3);
 		doc.fontSize(11)
 			.text(`- Tổng số hoạt động: ${total}`)
-			.text(`- Điểm trung bình: ${avgScore}%`);
+			.text(`- Điểm trung bình: ${avgScore}`);
 
 		doc.moveDown();
 		doc.fontSize(12).text('Chi tiết bài học & trò chơi:', { underline: true });
 		doc.moveDown(0.5);
 
-		const headers = ['STT', 'Tên hoạt động', 'Loại', 'Danh mục', 'Điểm', 'Thời gian', 'Ngày hoàn thành'];
-		const colWidths = [30, 170, 60, 80, 50, 70, 100];
+		const headers = ['STT', 'Tên hoạt động', 'Loại', 'Điểm', 'Thời gian', 'Ngày hoàn thành'];
+		const colWidths = [30, 220, 60, 50, 70, 100];
 		const startX = doc.x;
 		let y = doc.y;
 
+		if (mainFont) { try { doc.font('DejaVu-Bold'); } catch { doc.font(mainFont); } }
 		doc.fontSize(9);
 		headers.forEach((h, i) => {
 			doc.text(h, startX + colWidths.slice(0, i).reduce((a, b) => a + b, 0) + 2, y, {
@@ -191,7 +228,6 @@ const generateStudentReportPdf = async ({ student, activities, outputDir }) => {
 
 		y += 16;
 		doc.moveTo(startX, y - 4).lineTo(startX + colWidths.reduce((a, b) => a + b, 0), y - 4).stroke();
-		doc.font('Helvetica');
 
 		const formatTime = (seconds = 0) => {
 			const m = Math.floor(seconds / 60);
@@ -208,24 +244,42 @@ const generateStudentReportPdf = async ({ student, activities, outputDir }) => {
 			}
 		};
 
+		// Rows with alternating background and score fallback to 0
 		activities.forEach((a, idx) => {
-			if (y > doc.page.height - 80) {
+			if (y > doc.page.height - 100) {
 				doc.addPage();
 				y = doc.y;
+			}
+
+			const rowHeight = 14;
+			const rowY = y - 2;
+			if (idx % 2 === 0) {
+				doc.save();
+				doc.rect(startX, rowY, colWidths.reduce((a, b) => a + b, 0), rowHeight).fill('#f7f7f7');
+				doc.restore();
+			}
+
+			// Prefer teacherScore for games; if teacherScore explicitly null -> blank
+			let displayScore;
+			if (a.type === 'troChoi' && Object.prototype.hasOwnProperty.call(a, 'teacherScore')) {
+				displayScore = a.teacherScore === null ? '' : String(a.teacherScore);
+			} else {
+				const scoreVal = typeof a.score === 'number' ? a.score : 0;
+				displayScore = String(scoreVal);
 			}
 
 			const row = [
 				String(idx + 1),
 				a.title || '',
 				a.type === 'troChoi' ? 'Trò chơi' : 'Bài học',
-				a.category || '',
-				typeof a.score === 'number' ? `${a.score}%` : '',
+				displayScore,
 				formatTime(a.timeSpent || 0),
 				formatDate(a.completedAt)
 			];
 
+			if (mainFont) { try { doc.font('DejaVu'); } catch { doc.font(mainFont); } }
 			row.forEach((cell, i) => {
-				doc.text(
+				doc.fillColor('black').text(
 					cell,
 					startX + colWidths.slice(0, i).reduce((acc, w) => acc + w, 0) + 2,
 					y,
@@ -236,13 +290,14 @@ const generateStudentReportPdf = async ({ student, activities, outputDir }) => {
 				);
 			});
 
-			y += 14;
+			y += rowHeight;
 		});
 
 		doc.moveDown();
-		doc.fontSize(9).text(`Ngày tạo báo cáo: ${new Date().toLocaleString('vi-VN')}`, {
-			align: 'right'
-		});
+		const now2 = new Date();
+		const dateStr2 = `${now2.toLocaleTimeString('vi-VN')} ${now2.toLocaleDateString('vi-VN')}`;
+		const pageWidth2 = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+		doc.fontSize(9).text(`Ngày tạo báo cáo: ${dateStr2}`, doc.page.margins.left, doc.y, { width: pageWidth2, align: 'right' });
 
 		doc.end();
 

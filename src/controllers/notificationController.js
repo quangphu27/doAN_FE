@@ -1,27 +1,80 @@
 const Joi = require('joi');
-const { Notification } = require('../models/ThongBao');
+const { ThongBao } = require('../models/ThongBao');
 const User = require('../models/NguoiDung');
 const Child = require('../models/TreEm');
 
 const getNotifications = async (req, res, next) => {
 	try {
 		const { page = 1, limit = 20, type, isRead } = req.query;
-		const filter = { user: req.user.id };
-		if (type) filter.type = type;
-		if (isRead !== undefined) filter.isRead = isRead === 'true';
 		
-		const notifications = await Notification.find(filter)
-			.populate('child', 'name avatarUrl')
+		// Xử lý filter dựa trên vai trò người dùng
+		let filter = {};
+		if (req.user.vaiTro === 'phuHuynh') {
+			// Phụ huynh: lấy thông báo của mình hoặc của trẻ mình quản lý
+			const children = await Child.find({ phuHuynh: req.user.id }).select('_id');
+			const childIds = children.map(c => c._id);
+			filter = {
+				$or: [
+					{ nguoiDung: req.user.id },
+					{ treEm: { $in: childIds } }
+				]
+			};
+		} else if (req.user.vaiTro === 'hocSinh') {
+			// Học sinh: lấy thông báo của trẻ (vì Child._id = User._id)
+			const child = await Child.findById(req.user.id);
+			if (child) {
+				filter = {
+					$or: [
+						{ nguoiDung: req.user.id },
+						{ treEm: child._id }
+					]
+				};
+			} else {
+				filter = { nguoiDung: req.user.id };
+			}
+		} else {
+			filter = { nguoiDung: req.user.id };
+		}
+		
+		if (type) filter.loai = type;
+		if (isRead !== undefined) filter.daDoc = isRead === 'true';
+		
+		const notifications = await ThongBao.find(filter)
+			.populate('nguoiDung', 'hoTen email')
+			.populate('treEm', 'hoTen anhDaiDien')
+			.populate('duLieu.idBaiHoc', 'tieuDe danhMuc')
+			.populate('duLieu.idTroChoi', 'tieuDe loai')
 			.sort({ createdAt: -1 })
 			.limit(parseInt(limit))
 			.skip((parseInt(page) - 1) * parseInt(limit));
 		
-		const total = await Notification.countDocuments(filter);
+		const total = await ThongBao.countDocuments(filter);
+		
+		// Map dữ liệu để trả về format đúng với frontend
+		const mappedNotifications = notifications.map(notif => ({
+			_id: notif._id,
+			id: notif._id,
+			user: notif.nguoiDung?._id || notif.nguoiDung,
+			child: notif.treEm?._id || notif.treEm,
+			type: notif.loai,
+			title: notif.tieuDe,
+			content: notif.noiDung,
+			data: {
+				lessonId: notif.duLieu?.idBaiHoc?._id || notif.duLieu?.idBaiHoc,
+				gameId: notif.duLieu?.idTroChoi?._id || notif.duLieu?.idTroChoi,
+				score: notif.duLieu?.diemSo,
+				achievement: notif.duLieu?.thanhTich
+			},
+			isRead: notif.daDoc || false,
+			readAt: notif.ngayDoc,
+			createdAt: notif.createdAt || notif.ngayGui,
+			updatedAt: notif.updatedAt
+		}));
 		
 		res.json({ 
 			success: true, 
 			data: { 
-				notifications, 
+				notifications: mappedNotifications, 
 				pagination: { 
 					total, 
 					page: parseInt(page), 
@@ -37,9 +90,21 @@ const getNotifications = async (req, res, next) => {
 
 const markAsRead = async (req, res, next) => {
 	try {
-		const notification = await Notification.findOneAndUpdate(
-			{ _id: req.params.id, user: req.user.id },
-			{ isRead: true, readAt: new Date() },
+		let filter = { _id: req.params.id };
+		if (req.user.vaiTro === 'phuHuynh') {
+			const children = await Child.find({ phuHuynh: req.user.id }).select('_id');
+			const childIds = children.map(c => c._id);
+			filter.$or = [
+				{ nguoiDung: req.user.id },
+				{ treEm: { $in: childIds } }
+			];
+		} else {
+			filter.nguoiDung = req.user.id;
+		}
+		
+		const notification = await ThongBao.findOneAndUpdate(
+			filter,
+			{ daDoc: true, ngayDoc: new Date() },
 			{ new: true }
 		);
 		
@@ -55,9 +120,22 @@ const markAsRead = async (req, res, next) => {
 
 const markAllAsRead = async (req, res, next) => {
 	try {
-		await Notification.updateMany(
-			{ user: req.user.id, isRead: false },
-			{ isRead: true, readAt: new Date() }
+		// Xử lý filter dựa trên vai trò người dùng
+		let filter = { daDoc: false };
+		if (req.user.vaiTro === 'phuHuynh') {
+			const children = await Child.find({ phuHuynh: req.user.id }).select('_id');
+			const childIds = children.map(c => c._id);
+			filter.$or = [
+				{ nguoiDung: req.user.id },
+				{ treEm: { $in: childIds } }
+			];
+		} else {
+			filter.nguoiDung = req.user.id;
+		}
+		
+		await ThongBao.updateMany(
+			filter,
+			{ daDoc: true, ngayDoc: new Date() }
 		);
 		
 		res.json({ success: true, message: 'Đã đánh dấu tất cả thông báo là đã đọc' });
@@ -71,7 +149,7 @@ const createNotification = async (req, res, next) => {
 		const schema = Joi.object({
 			user: Joi.string().required(),
 			child: Joi.string().optional(),
-			type: Joi.string().valid('reminder', 'summary', 'achievement', 'system', 'schedule').required(),
+			type: Joi.string().valid('nhacNho', 'tomTat', 'thanhTich', 'heThong', 'lichHoc').required(),
 			title: Joi.string().required(),
 			content: Joi.string().required(),
 			data: Joi.object({
@@ -83,7 +161,23 @@ const createNotification = async (req, res, next) => {
 		});
 		
 		const notificationData = await schema.validateAsync(req.body);
-		const notification = await Notification.create(notificationData);
+		
+		// Map từ format frontend sang format model
+		const notification = await ThongBao.create({
+			nguoiDung: notificationData.user,
+			treEm: notificationData.child,
+			loai: notificationData.type,
+			tieuDe: notificationData.title,
+			noiDung: notificationData.content,
+			duLieu: notificationData.data ? {
+				idBaiHoc: notificationData.data.lessonId,
+				idTroChoi: notificationData.data.gameId,
+				diemSo: notificationData.data.score,
+				thanhTich: notificationData.data.achievement
+			} : undefined,
+			daDoc: false,
+			ngayGui: new Date()
+		});
 		
 		res.status(201).json({ success: true, data: notification });
 	} catch (e) {
@@ -93,10 +187,20 @@ const createNotification = async (req, res, next) => {
 
 const deleteNotification = async (req, res, next) => {
 	try {
-		const notification = await Notification.findOneAndDelete({
-			_id: req.params.id,
-			user: req.user.id
-		});
+		// Tìm thông báo với điều kiện phù hợp với vai trò
+		let filter = { _id: req.params.id };
+		if (req.user.vaiTro === 'phuHuynh') {
+			const children = await Child.find({ phuHuynh: req.user.id }).select('_id');
+			const childIds = children.map(c => c._id);
+			filter.$or = [
+				{ nguoiDung: req.user.id },
+				{ treEm: { $in: childIds } }
+			];
+		} else {
+			filter.nguoiDung = req.user.id;
+		}
+		
+		const notification = await ThongBao.findOneAndDelete(filter);
 		
 		if (!notification) {
 			return res.status(404).json({ success: false, message: 'Không tìm thấy thông báo' });
@@ -110,10 +214,30 @@ const deleteNotification = async (req, res, next) => {
 
 const getUnreadCount = async (req, res, next) => {
 	try {
-		const count = await Notification.countDocuments({
-			user: req.user.id,
-			isRead: false
-		});
+		// Xử lý filter dựa trên vai trò người dùng
+		let filter = { daDoc: false };
+		if (req.user.vaiTro === 'phuHuynh') {
+			const children = await Child.find({ phuHuynh: req.user.id }).select('_id');
+			const childIds = children.map(c => c._id);
+			filter.$or = [
+				{ nguoiDung: req.user.id },
+				{ treEm: { $in: childIds } }
+			];
+		} else if (req.user.vaiTro === 'hocSinh') {
+			const child = await Child.findById(req.user.id);
+			if (child) {
+				filter.$or = [
+					{ nguoiDung: req.user.id },
+					{ treEm: child._id }
+				];
+			} else {
+				filter.nguoiDung = req.user.id;
+			}
+		} else {
+			filter.nguoiDung = req.user.id;
+		}
+		
+		const count = await ThongBao.countDocuments(filter);
 		
 		res.json({ success: true, data: { count } });
 	} catch (e) {
@@ -136,21 +260,34 @@ const sendNotificationToAll = async (req, res, next) => {
 		
 		let users;
 		if (targetRole === 'all') {
-			users = await User.find({ isActive: true });
+			users = await User.find({ trangThai: true });
+		} else if (targetRole === 'parent') {
+			users = await User.find({ vaiTro: 'phuHuynh', trangThai: true });
+		} else if (targetRole === 'child') {
+			users = await User.find({ vaiTro: 'hocSinh', trangThai: true });
 		} else {
-			users = await User.find({ role: targetRole, isActive: true });
+			users = await User.find({ vaiTro: targetRole, trangThai: true });
 		}
 		
+		// Map type từ frontend sang model
+		const loaiMap = {
+			'reminder': 'nhacNho',
+			'summary': 'tomTat',
+			'achievement': 'thanhTich',
+			'system': 'heThong',
+			'schedule': 'lichHoc'
+		};
+		
 		const notifications = users.map(user => ({
-			user: user._id,
-			type,
-			title,
-			content,
-			sentAt: scheduledAt || new Date(),
-			scheduledBy: req.user.id
+			nguoiDung: user._id,
+			loai: loaiMap[type] || type,
+			tieuDe: title,
+			noiDung: content,
+			daDoc: false,
+			ngayGui: scheduledAt || new Date()
 		}));
 		
-		await Notification.insertMany(notifications);
+		await ThongBao.insertMany(notifications);
 		
 		const NotificationHistory = require('../models/LichSuThongBao');
 		await NotificationHistory.create({
@@ -228,10 +365,29 @@ const sendNotificationToChild = async (req, res, next) => {
 			return res.status(404).json({ success: false, message: 'Không tìm thấy trẻ' });
 		}
 		
-		const notification = await Notification.create({
-			...notificationData,
-			user: child.parent,
-			child: child._id
+		// Map type từ frontend sang model
+		const loaiMap = {
+			'reminder': 'nhacNho',
+			'summary': 'tomTat',
+			'achievement': 'thanhTich',
+			'system': 'heThong',
+			'schedule': 'lichHoc'
+		};
+		
+		const notification = await ThongBao.create({
+			nguoiDung: child.phuHuynh,
+			treEm: child._id,
+			loai: loaiMap[notificationData.type] || notificationData.type,
+			tieuDe: notificationData.title,
+			noiDung: notificationData.content,
+			duLieu: notificationData.data ? {
+				idBaiHoc: notificationData.data.lessonId,
+				idTroChoi: notificationData.data.gameId,
+				diemSo: notificationData.data.score,
+				thanhTich: notificationData.data.achievement
+			} : undefined,
+			daDoc: false,
+			ngayGui: new Date()
 		});
 		
 		res.status(201).json({ success: true, data: notification });

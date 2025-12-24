@@ -720,25 +720,29 @@ const exportLessonResultsReport = async (req, res, next) => {
 			submittedProgress.map(p => [p.treEm._id.toString(), p])
 		);
 
-		const submittedStudents = allStudents
-			.filter(s => submittedMap.has(s.studentId.toString()))
-			.map(s => {
-				const p = submittedMap.get(s.studentId.toString());
-				return {
-					studentName: s.studentName,
-					className: s.className,
-					score: p.diemSo || 0,
-					teacherScore: typeof p.diemGiaoVien === 'number' ? p.diemGiaoVien : null,
-					timeSpent: p.thoiGianDaDung || 0
-				};
-			});
+		// Build results array including students who haven't submitted (score 0)
+		const results = allStudents.map(s => {
+			const p = submittedMap.get(s.studentId.toString());
+			const teacherScore = p && typeof p.diemGiaoVien === 'number' ? p.diemGiaoVien : null;
+			const systemScore = p ? (p.diemSo || 0) : 0;
+			const score = teacherScore !== null ? teacherScore : systemScore;
+
+			return {
+				studentName: s.studentName,
+				className: s.className,
+				score,
+				teacherScore,
+				timeSpent: p ? (p.thoiGianDaDung || 0) : 0
+			};
+		});
 
 		const summary = {
 			totalStudents: allStudents.length,
-			submittedCount: submittedStudents.length,
-			notSubmittedCount: allStudents.length - submittedStudents.length,
-			averageScore: submittedStudents.length > 0
-				? Math.round(submittedStudents.reduce((sum, s) => sum + (s.score || 0), 0) / submittedStudents.length)
+			submittedCount: submittedProgress.length,
+			notSubmittedCount: allStudents.length - submittedProgress.length,
+			// average across all students (missing counted as 0)
+			averageScore: allStudents.length > 0
+				? Math.round(results.reduce((sum, s) => sum + (s.score || 0), 0) / allStudents.length)
 				: 0
 		};
 
@@ -751,7 +755,7 @@ const exportLessonResultsReport = async (req, res, next) => {
 				category: lesson.danhMuc || ''
 			},
 			summary,
-			results: submittedStudents,
+			results,
 			outputDir
 		});
 
@@ -831,25 +835,29 @@ const sendLessonResultsReportEmail = async (req, res, next) => {
 			submittedProgress.map(p => [p.treEm._id.toString(), p])
 		);
 
-		const submittedStudents = allStudents
-			.filter(s => submittedMap.has(s.studentId.toString()))
-			.map(s => {
-				const p = submittedMap.get(s.studentId.toString());
-				return {
-					studentName: s.studentName,
-					className: s.className,
-					score: p.diemSo || 0,
-					teacherScore: typeof p.diemGiaoVien === 'number' ? p.diemGiaoVien : null,
-					timeSpent: p.thoiGianDaDung || 0
-				};
-			});
+		// Build results array including students who haven't submitted (score 0)
+		const results = allStudents.map(s => {
+			const p = submittedMap.get(s.studentId.toString());
+			const teacherScore = p && typeof p.diemGiaoVien === 'number' ? p.diemGiaoVien : null;
+			const systemScore = p ? (p.diemSo || 0) : 0;
+			const score = teacherScore !== null ? teacherScore : systemScore;
+
+			return {
+				studentName: s.studentName,
+				className: s.className,
+				score,
+				teacherScore,
+				timeSpent: p ? (p.thoiGianDaDung || 0) : 0
+			};
+		});
 
 		const summary = {
 			totalStudents: allStudents.length,
-			submittedCount: submittedStudents.length,
-			notSubmittedCount: allStudents.length - submittedStudents.length,
-			averageScore: submittedStudents.length > 0
-				? Math.round(submittedStudents.reduce((sum, s) => sum + (s.score || 0), 0) / submittedStudents.length)
+			submittedCount: submittedProgress.length,
+			notSubmittedCount: allStudents.length - submittedProgress.length,
+			// average across all students (missing counted as 0)
+			averageScore: allStudents.length > 0
+				? Math.round(results.reduce((sum, s) => sum + (s.score || 0), 0) / allStudents.length)
 				: 0
 		};
 
@@ -862,7 +870,7 @@ const sendLessonResultsReportEmail = async (req, res, next) => {
 				category: lesson.danhMuc || ''
 			},
 			summary,
-			results: submittedStudents,
+			results,
 			outputDir
 		});
 

@@ -6,43 +6,66 @@ const startSession = async (req, res, next) => {
 		const { childId } = req.body;
 		
 		let child;
-		if (req.user.vaiTro === 'hocSinh' && req.user.id === childId) {
-			child = await Child.findOne({ _id: childId });
+		if (req.user.vaiTro === 'hocSinh') {
+			// Học sinh: tìm Child với _id = req.user.id (vì Child._id = User học sinh._id)
+			// Không cần childId từ body
+			child = await Child.findById(req.user.id || req.user._id);
+			if (!child) {
+				return res.status(404).json({ success: false, message: 'Không tìm thấy hồ sơ học sinh' });
+			}
 		} else {
+			if (!childId) {
+				return res.status(400).json({ success: false, message: 'Child ID is required' });
+			}
 			child = await Child.findOne({ _id: childId, phuHuynh: req.user.id });
+			if (!child) {
+				return res.status(404).json({ success: false, message: 'Child not found' });
+			}
 		}
 		
-		if (!child) {
-			return res.status(404).json({ success: false, message: 'Child not found' });
-		}
+		const actualChildId = child._id.toString();
 
-	const activeSession = await AppSession.findOne({ 
-		child: childId, 
-		status: 'active' 
-	});
-
-	if (activeSession) {
-		activeSession.startTime = new Date();
-		await activeSession.save();
-		
-		return res.json({ 
-			success: true, 
-			data: activeSession,
-			message: 'Session updated with new start time'
+		const activeSession = await AppSession.findOne({ 
+			treEm: actualChildId, 
+			trangThai: 'dangHoatDong' 
 		});
-	}
 
-	const session = new AppSession({
-		child: childId,
-		startTime: new Date(),
-		status: 'active'
-	});
+		if (activeSession) {
+			activeSession.thoiGianBatDau = new Date();
+			await activeSession.save();
+			
+			return res.json({ 
+				success: true, 
+				data: {
+					_id: activeSession._id,
+					child: activeSession.treEm,
+					startTime: activeSession.thoiGianBatDau,
+					endTime: activeSession.thoiGianKetThuc,
+					duration: activeSession.thoiGian,
+					status: activeSession.trangThai === 'dangHoatDong' ? 'active' : 'completed'
+				},
+				message: 'Session updated with new start time'
+			});
+		}
 
-	await session.save();
+		const session = new AppSession({
+			treEm: actualChildId,
+			thoiGianBatDau: new Date(),
+			trangThai: 'dangHoatDong'
+		});
+
+		await session.save();
 
 		res.json({
 			success: true,
-			data: session,
+			data: {
+				_id: session._id,
+				child: session.treEm,
+				startTime: session.thoiGianBatDau,
+				endTime: session.thoiGianKetThuc,
+				duration: session.thoiGian,
+				status: 'active'
+			},
 			message: 'Session started'
 		});
 	} catch (e) {
@@ -55,34 +78,51 @@ const endSession = async (req, res, next) => {
 		const { childId } = req.body;
 		
 		let child;
-		if (req.user.vaiTro === 'hocSinh' && req.user.id === childId) {
-			child = await Child.findOne({ _id: childId });
+		if (req.user.vaiTro === 'hocSinh') {
+			// Học sinh: tìm Child với _id = req.user.id (vì Child._id = User học sinh._id)
+			// Không cần childId từ body
+			child = await Child.findById(req.user.id || req.user._id);
+			if (!child) {
+				return res.status(404).json({ success: false, message: 'Không tìm thấy hồ sơ học sinh' });
+			}
 		} else {
+			// Phụ huynh: cần childId từ body
+			if (!childId) {
+				return res.status(400).json({ success: false, message: 'Child ID is required' });
+			}
 			child = await Child.findOne({ _id: childId, phuHuynh: req.user.id });
+			if (!child) {
+				return res.status(404).json({ success: false, message: 'Child not found' });
+			}
 		}
 		
-		if (!child) {
-			return res.status(404).json({ success: false, message: 'Child not found' });
-		}
+		const actualChildId = child._id.toString();
 
 		const session = await AppSession.findOne({ 
-			child: childId, 
-			status: 'active' 
+			treEm: actualChildId, 
+			trangThai: 'dangHoatDong' 
 		});
 
 		if (!session) {
 			return res.status(404).json({ success: false, message: 'No active session found' });
 		}
 
-		session.endTime = new Date();
-		session.duration = Math.floor((session.endTime - session.startTime) / 1000);
-		session.status = 'completed';
+		session.thoiGianKetThuc = new Date();
+		session.thoiGian = Math.floor((session.thoiGianKetThuc - session.thoiGianBatDau) / 1000);
+		session.trangThai = 'hoanThanh';
 
 		await session.save();
 
 		res.json({
 			success: true,
-			data: session,
+			data: {
+				_id: session._id,
+				child: session.treEm,
+				startTime: session.thoiGianBatDau,
+				endTime: session.thoiGianKetThuc,
+				duration: session.thoiGian,
+				status: 'completed'
+			},
 			message: 'Session ended'
 		});
 	} catch (e) {
@@ -95,22 +135,42 @@ const getChildSessions = async (req, res, next) => {
 		const { childId } = req.params;
 		const { page = 1, limit = 50 } = req.query;
 		
-		const child = await Child.findOne({ _id: childId, phuHuynh: req.user.id });
+		let child;
+		if (req.user.vaiTro === 'hocSinh') {
+			// Học sinh: tìm Child với _id = req.user.id
+			child = await Child.findById(req.user.id || req.user._id);
+		} else {
+			// Phụ huynh: tìm Child với _id = childId và phuHuynh = req.user.id
+			child = await Child.findOne({ _id: childId, phuHuynh: req.user.id });
+		}
+		
 		if (!child) {
 			return res.status(404).json({ success: false, message: 'Child not found' });
 		}
 
-		const sessions = await AppSession.find({ child: childId })
-			.sort({ startTime: -1 })
+		const actualChildId = child._id.toString();
+		const sessions = await AppSession.find({ treEm: actualChildId })
+			.sort({ thoiGianBatDau: -1 })
 			.limit(parseInt(limit))
 			.skip((parseInt(page) - 1) * parseInt(limit));
 
-		const total = await AppSession.countDocuments({ child: childId });
+		const total = await AppSession.countDocuments({ treEm: actualChildId });
+
+		// Map sessions để trả về format đúng với frontend
+		const mappedSessions = sessions.map(session => ({
+			_id: session._id,
+			id: session._id,
+			child: session.treEm,
+			startTime: session.thoiGianBatDau,
+			endTime: session.thoiGianKetThuc,
+			duration: session.thoiGian,
+			status: session.trangThai === 'dangHoatDong' ? 'active' : 'completed'
+		}));
 
 		res.json({
 			success: true,
 			data: {
-				sessions,
+				sessions: mappedSessions,
 				pagination: {
 					total,
 					page: parseInt(page),
@@ -129,18 +189,27 @@ const getTotalUsageTime = async (req, res, next) => {
 		const { childId } = req.params;
 		const { startDate, endDate } = req.query;
 		
-		const child = await Child.findOne({ _id: childId, phuHuynh: req.user.id });
+		let child;
+		if (req.user.vaiTro === 'hocSinh') {
+			// Học sinh: tìm Child với _id = req.user.id
+			child = await Child.findById(req.user.id || req.user._id);
+		} else {
+			// Phụ huynh: tìm Child với _id = childId và phuHuynh = req.user.id
+			child = await Child.findOne({ _id: childId, phuHuynh: req.user.id });
+		}
+		
 		if (!child) {
 			return res.status(404).json({ success: false, message: 'Child not found' });
 		}
 
+		const actualChildId = child._id.toString();
 		const filter = { 
-			child: childId,
-			status: 'completed'
+			treEm: actualChildId,
+			trangThai: 'hoanThanh'
 		};
 
 		if (startDate && endDate) {
-			filter.startTime = {
+			filter.thoiGianBatDau = {
 				$gte: new Date(startDate),
 				$lte: new Date(endDate)
 			};
@@ -151,7 +220,7 @@ const getTotalUsageTime = async (req, res, next) => {
 			{
 				$group: {
 					_id: null,
-					totalDuration: { $sum: '$duration' },
+					totalDuration: { $sum: '$thoiGian' },
 					sessionCount: { $sum: 1 }
 				}
 			}
@@ -177,24 +246,32 @@ const getLastActivityTime = async (req, res, next) => {
 	try {
 		const { childId } = req.params;
 		
-		const childQuery = req.user.vaiTro === 'admin' 
-			? { _id: childId }
-			: { _id: childId, phuHuynh: req.user.id };
+		let child;
+		if (req.user.vaiTro === 'hocSinh') {
+			// Học sinh: tìm Child với _id = req.user.id
+			child = await Child.findById(req.user.id || req.user._id);
+		} else if (req.user.vaiTro === 'admin') {
+			// Admin: tìm Child với _id = childId
+			child = await Child.findById(childId);
+		} else {
+			// Phụ huynh: tìm Child với _id = childId và phuHuynh = req.user.id
+			child = await Child.findOne({ _id: childId, phuHuynh: req.user.id });
+		}
 		
-		const child = await Child.findOne(childQuery);
 		if (!child) {
 			return res.status(404).json({ success: false, message: 'Child not found' });
 		}
 
+		const actualChildId = child._id.toString();
 		const activeSession = await AppSession.findOne({ 
-			child: childId,
-			status: 'active'
+			treEm: actualChildId,
+			trangThai: 'dangHoatDong'
 		})
-		.sort({ startTime: -1 });
+		.sort({ thoiGianBatDau: -1 });
 
 		if (activeSession) {
 			const now = new Date();
-			const diffInSeconds = Math.floor((now - activeSession.startTime) / 1000);
+			const diffInSeconds = Math.floor((now - activeSession.thoiGianBatDau) / 1000);
 			const durationInMinutes = Math.floor(diffInSeconds / 60);
 			const durationInHours = Math.floor(diffInSeconds / 3600);
 			
@@ -229,7 +306,7 @@ const getLastActivityTime = async (req, res, next) => {
 			return res.json({
 				success: true,
 				data: {
-					lastActivityTime: activeSession.startTime,
+					lastActivityTime: activeSession.thoiGianBatDau,
 					timeAgo,
 					duration: diffInSeconds,
 					isActive: true,
@@ -239,10 +316,10 @@ const getLastActivityTime = async (req, res, next) => {
 		}
 
 		const lastSession = await AppSession.findOne({ 
-			child: childId,
-			status: 'completed'
+			treEm: actualChildId,
+			trangThai: 'hoanThanh'
 		})
-		.sort({ endTime: -1 });
+		.sort({ thoiGianKetThuc: -1 });
 
 		if (!lastSession) {
 			return res.json({
@@ -258,7 +335,7 @@ const getLastActivityTime = async (req, res, next) => {
 		}
 
 		const now = new Date();
-		const diffInSeconds = Math.floor((now - lastSession.endTime) / 1000);
+		const diffInSeconds = Math.floor((now - lastSession.thoiGianKetThuc) / 1000);
 		
 		let timeAgo;
 		if (diffInSeconds < 60) {
@@ -276,9 +353,9 @@ const getLastActivityTime = async (req, res, next) => {
 		res.json({
 			success: true,
 			data: {
-				lastActivityTime: lastSession.endTime,
+				lastActivityTime: lastSession.thoiGianKetThuc,
 				timeAgo,
-				duration: lastSession.duration,
+				duration: lastSession.thoiGian,
 				isActive: false,
 				statusText: 'Đã kết thúc'
 			}

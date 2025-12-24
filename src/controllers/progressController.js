@@ -144,18 +144,33 @@ const getProgressStats = async (req, res, next) => {
 
 const getRecentProgress = async (req, res, next) => {
 	try {
-		let targetChildId = req.params.childId;
+		const paramId = req.params.childId || req.params.userId;
+		let targetChildId;
+		
 		if (req.user.vaiTro === 'hocSinh') {
-			targetChildId = req.user.id;
+			const child = await Child.findById(req.user.id || req.user._id);
+			if (!child) {
+				return res.status(404).json({ success: false, message: 'Không tìm thấy hồ sơ học sinh' });
+			}
+			targetChildId = child._id.toString();
 		} else {
-			const child = await Child.findOne({ _id: req.params.childId, phuHuynh: req.user.id });
-			if (!child) return res.status(404).json({ success: false, message: 'Không tìm thấy trẻ' });
-			targetChildId = child._id;
+			// Phụ huynh/Admin: tìm Child với _id = paramId và phuHuynh = req.user.id (nếu là phụ huynh)
+			let child;
+			if (req.user.vaiTro === 'admin') {
+				child = await Child.findById(paramId);
+			} else {
+				child = await Child.findOne({ _id: paramId, phuHuynh: req.user.id });
+			}
+			if (!child) {
+				return res.status(404).json({ success: false, message: 'Không tìm thấy trẻ' });
+			}
+			targetChildId = child._id.toString();
 		}
 		
 		const recentProgress = await Progress.find({ treEm: targetChildId })
-			.populate('lesson', 'tieuDe danhMuc capDo')
-			.sort({ updatedAt: -1 })
+			.populate('baiHoc', 'tieuDe danhMuc capDo')
+			.populate('troChoi', 'tieuDe loai danhMuc')
+			.sort({ createdAt: -1 })
 			.limit(10);
 		
 		res.json({ success: true, data: recentProgress });
@@ -182,7 +197,7 @@ const recordGameResult = async (req, res, next) => {
 		
 		let childId = req.body.childId;
 		if (req.user.vaiTro === 'hocSinh') {
-			const childRecord = await Child.findOne({ phuHuynh: req.user.id || req.user._id });
+			const childRecord = await Child.findById(req.user.id || req.user._id);
 			if (!childRecord) {
 				return res.status(404).json({ success: false, message: 'Không tìm thấy hồ sơ học sinh' });
 			}
@@ -246,7 +261,7 @@ const recordLessonResult = async (req, res, next) => {
 		
 		let childId = req.body.childId;
 		if (req.user.vaiTro === 'hocSinh') {
-			const childRecord = await Child.findOne({ phuHuynh: req.user.id || req.user._id });
+			const childRecord = await Child.findById(req.user.id || req.user._id);
 			if (!childRecord) {
 				return res.status(404).json({ success: false, message: 'Không tìm thấy hồ sơ học sinh' });
 			}
@@ -376,12 +391,22 @@ const getChildDetailReport = async (req, res, next) => {
 		const classes = await ClassModel.find({ hocSinh: child._id })
 			.select('tenLop moTa');
 		
-		const progressList = await Progress.find({ treEm: child._id, loai: 'baiHoc' })
-			.populate({
-				path: 'baiHoc',
-				select: 'tieuDe danhMuc capDo moTa noiDung lop'
-			})
-			.sort({ updatedAt: -1 });
+		const Game = require('../models/TroChoi');
+		
+		const [lessonProgressList, gameProgressList] = await Promise.all([
+			Progress.find({ treEm: child._id, loai: 'baiHoc' })
+				.populate({
+					path: 'baiHoc',
+					select: 'tieuDe danhMuc capDo moTa noiDung lop'
+				})
+				.sort({ updatedAt: -1 }),
+			Progress.find({ treEm: child._id, loai: 'troChoi' })
+				.populate({
+					path: 'troChoi',
+					select: 'tieuDe loai danhMuc moTa capDo lop'
+				})
+				.sort({ updatedAt: -1 })
+		]);
 
 		const classReportsMap = new Map();
 
@@ -390,28 +415,33 @@ const getChildDetailReport = async (req, res, next) => {
 				classId: cls._id,
 				className: cls.tenLop,
 				classDescription: cls.moTa,
-				lessons: []
+				lessons: [],
+				games: []
 			});
 		});
 
-		const ensureClassEntry = (classId, className = 'Bài học cá nhân') => {
+		const ensureClassEntry = (classId, className = 'Hoạt động cá nhân') => {
 			if (!classReportsMap.has(classId)) {
 				classReportsMap.set(classId, {
 					classId,
 					className,
-					classDescription: classId === 'others' ? 'Các bài học không thuộc lớp cụ thể' : '',
-					lessons: []
+					classDescription: classId === 'others' ? 'Các hoạt động không thuộc lớp cụ thể' : '',
+					lessons: [],
+					games: []
 				});
 			}
 			return classReportsMap.get(classId);
 		};
 
-		progressList.forEach(progress => {
+		// Xử lý bài học
+		lessonProgressList.forEach(progress => {
 			if (!progress.baiHoc) return;
 			
 			const lesson = progress.baiHoc;
-			const classId = lesson.lop ? lesson.lop.toString() : 'others';
-			const classEntry = ensureClassEntry(classId, classes.find(c => c._id.toString() === classId)?.tenLop || 'Bài học cá nhân');
+			const classId = lesson.lop && lesson.lop.length > 0 
+				? lesson.lop[0].toString() 
+				: 'others';
+			const classEntry = ensureClassEntry(classId, classes.find(c => c._id.toString() === classId)?.tenLop || 'Hoạt động cá nhân');
 
 			const questionBank = (lesson.noiDung && Array.isArray(lesson.noiDung.baiTap))
 				? lesson.noiDung.baiTap.map(q => ({
@@ -439,6 +469,53 @@ const getChildDetailReport = async (req, res, next) => {
 					isCorrect: answer.dung
 				})),
 				questions: questionBank
+			});
+		});
+
+		// Xử lý trò chơi
+		gameProgressList.forEach(progress => {
+			if (!progress.troChoi) return;
+			
+			const game = progress.troChoi;
+			let classId = 'others';
+			let className = 'Hoạt động cá nhân';
+			
+			if (game.lop && Array.isArray(game.lop) && game.lop.length > 0) {
+				const matchingClass = classes.find(c => 
+					game.lop.some(lopId => lopId.toString() === c._id.toString())
+				);
+				if (matchingClass) {
+					classId = matchingClass._id.toString();
+					className = matchingClass.tenLop;
+				} else {
+					// Nếu game thuộc lớp nhưng học sinh không thuộc lớp đó, vẫn đặt vào lớp đó
+					classId = game.lop[0].toString();
+					className = 'Lớp khác';
+				}
+			}
+			
+			const classEntry = ensureClassEntry(classId, className);
+
+			classEntry.games.push({
+				gameId: game._id,
+				title: game.tieuDe,
+				type: game.loai,
+				category: game.danhMuc,
+				level: game.capDo,
+				description: game.moTa,
+				status: progress.trangThai || 'hoanThanh',
+				score: progress.diemSo || 0,
+				timeSpent: progress.thoiGianDaDung || 0,
+				completedAt: progress.ngayHoanThanh || progress.updatedAt,
+				attempts: progress.soLanThu || 1,
+				answers: (progress.cauTraLoi || []).map(answer => ({
+					questionId: answer.idBaiTap,
+					answer: answer.cauTraLoi,
+					isCorrect: answer.dung
+				})),
+				resultImage: progress.tepKetQua || null,
+				teacherScore: progress.diemGiaoVien || null,
+				gradingStatus: progress.trangThaiChamDiem || 'chuaCham'
 			});
 		});
 
