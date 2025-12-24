@@ -4,7 +4,8 @@ const {
 	getStats, 
 	getUsers, 
 	getChildren, 
-	getReports
+	getReports,
+	getActiveChildren
 } = require('../../controllers/adminController');
 const router = express.Router();
 
@@ -13,6 +14,7 @@ router.use(authorize(['admin']));
 router.get('/stats', getStats);
 router.get('/users', getUsers);
 router.get('/children', getChildren);
+router.get('/active-children', getActiveChildren);
 router.get('/reports', getReports);
 
 module.exports = router;
