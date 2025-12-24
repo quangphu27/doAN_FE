@@ -9,10 +9,27 @@ const { sendReportEmail } = require('../services/emailService');
 
 const listLessons = async (req, res, next) => {
 	try {
-		const { danhMuc, capDo, limit = 20, page = 1, childId } = req.query;
+		const { danhMuc, capDo, limit = 20, page = 1, childId, search } = req.query;
 		const filter = { trangThai: true };
 		if (danhMuc) filter.danhMuc = danhMuc;
 		if (capDo) filter.capDo = capDo;
+		
+		if (search) {
+			const Class = require('../models/Lop');
+			const searchRegex = new RegExp(search, 'i');
+			const matchingClasses = await Class.find({
+				tenLop: searchRegex
+			}).select('_id');
+			const classIds = matchingClasses.map(c => c._id);
+			
+			filter.$or = [
+				{ tieuDe: searchRegex },
+				{ moTa: searchRegex }
+			];
+			if (classIds.length > 0) {
+				filter.$or.push({ lop: { $in: classIds } });
+			}
+		}
 
 	let child = null;
 
@@ -68,9 +85,44 @@ const listLessons = async (req, res, next) => {
 
 			filter._id = { $in: lessonIds };
 		}
+		
+		if (search) {
+			const Class = require('../models/Lop');
+			const searchRegex = new RegExp(search, 'i');
+			const matchingClasses = await Class.find({
+				tenLop: searchRegex
+			}).select('_id');
+			const classIds = matchingClasses.map(c => c._id);
+			
+			const searchConditions = [
+				{ tieuDe: searchRegex },
+				{ moTa: searchRegex }
+			];
+			if (classIds.length > 0) {
+				searchConditions.push({ lop: { $in: classIds } });
+			}
+			
+			if (filter._id) {
+				// Nếu đã có filter _id (từ hocSinh), kết hợp với search
+				filter.$and = [
+					{ _id: filter._id },
+					{ $or: searchConditions }
+				];
+				delete filter._id;
+			} else {
+				filter.$or = searchConditions;
+			}
+		}
 
 		let lessons = await Lesson.find(filter)
-			.populate('lop', 'tenLop maLop')
+			.populate({
+				path: 'lop',
+				select: 'tenLop maLop',
+				populate: {
+					path: 'giaoVien',
+					select: 'hoTen email'
+				}
+			})
 			.sort({ thuTu: 1 })
 			.limit(parseInt(limit))
 			.skip((parseInt(page) - 1) * parseInt(limit));

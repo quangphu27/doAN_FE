@@ -34,7 +34,7 @@ router.post(
 );
 
 router.post('/', authorize(['giaoVien']), createGame);
-router.put('/:id', authorize(['giaoVien']), updateGame);
+router.put('/:id', authorize(['admin', 'giaoVien']), updateGame);
 router.delete('/:id', authorize(['admin', 'giaoVien']), deleteGame);
 router.post('/upload/puzzle', authorize(['giaoVien']), upload.single('image'), uploadPuzzleImage);
 router.post('/upload/guess', authorize(['giaoVien']), upload.single('image'), uploadGuessImage);

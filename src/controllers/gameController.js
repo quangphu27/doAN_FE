@@ -39,7 +39,7 @@ const upload = multer({
 
 const listGames = async (req, res, next) => {
 	try {
-		const { page = 1, limit = 20, type: loai, category: danhMuc, level: capDo, lop } = req.query;
+		const { page = 1, limit = 20, type: loai, category: danhMuc, level: capDo, lop, search } = req.query;
 		const filter = { trangThai: true };
 		if (loai) {
 			if (loai === 'guess_action') {
@@ -50,15 +50,46 @@ const listGames = async (req, res, next) => {
 		}
 		if (danhMuc) filter.danhMuc = danhMuc;
 		if (capDo) filter.capDo = capDo;
+		
 		// Admin xem tất cả, giáo viên xem theo lớp
+		let teacherClassIds = null;
 		if (req.user && req.user.vaiTro === 'giaoVien' && !lop) {
 			// Giáo viên chỉ xem game của lớp mình
 			const Class = require('../models/Lop');
 			const classes = await Class.find({ giaoVien: req.user.id || req.user._id }).select('_id');
-			const classIds = classes.map(c => c._id);
-			filter.lop = { $in: classIds };
+			teacherClassIds = classes.map(c => c._id);
+			filter.lop = { $in: teacherClassIds };
 		} else if (lop) {
 			filter.lop = lop;
+		}
+		
+		if (search) {
+			const Class = require('../models/Lop');
+			const searchRegex = new RegExp(search, 'i');
+			const matchingClasses = await Class.find({
+				tenLop: searchRegex,
+				...(teacherClassIds ? { _id: { $in: teacherClassIds } } : {})
+			}).select('_id');
+			const classIds = matchingClasses.map(c => c._id);
+			
+			const searchConditions = [
+				{ tieuDe: searchRegex },
+				{ moTa: searchRegex }
+			];
+			if (classIds.length > 0) {
+				searchConditions.push({ lop: { $in: classIds } });
+			}
+			
+			if (filter.lop) {
+				// Nếu đã có filter lop (từ giaoVien), kết hợp với search
+				filter.$and = [
+					{ lop: filter.lop },
+					{ $or: searchConditions }
+				];
+				delete filter.lop;
+			} else {
+				filter.$or = searchConditions;
+			}
 		}
 
 		if (req.user && req.user.vaiTro === 'hocSinh') {
@@ -108,7 +139,14 @@ const listGames = async (req, res, next) => {
 		// Admin xem tất cả (không filter theo lớp hoặc học sinh)
 
 		const games = await Game.find(filter)
-			.populate('lop', 'tenLop maLop')
+			.populate({
+				path: 'lop',
+				select: 'tenLop maLop',
+				populate: {
+					path: 'giaoVien',
+					select: 'hoTen email'
+				}
+			})
 			.populate('nguoiTao', 'hoTen email')
 			.sort({ createdAt: -1 })
 			.limit(parseInt(limit))
