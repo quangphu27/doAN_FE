@@ -1220,25 +1220,38 @@ const exportGameResultsReport = async (req, res, next) => {
 			submittedProgress.map(p => [p.treEm._id.toString(), p])
 		);
 
-		const submittedStudents = allStudents
-			.filter(s => submittedMap.has(s.studentId.toString()))
-			.map(s => {
-				const p = submittedMap.get(s.studentId.toString());
-				return {
-					studentName: s.studentName,
-					className: s.className,
-					score: p.diemSo || 0,
-					teacherScore: typeof p.diemGiaoVien === 'number' ? p.diemGiaoVien : null,
-					timeSpent: p.thoiGianDaDung || 0
-				};
-			});
+		const isColoringGame = game.loai === 'toMau';
+		
+		const results = allStudents.map(s => {
+			const p = submittedMap.get(s.studentId.toString());
+			const teacherScore = p && typeof p.diemGiaoVien === 'number' ? p.diemGiaoVien : null;
+			const systemScore = p && p.trangThai === 'hoanThanh' ? (p.diemSo || 0) : 0;
+			
+			let score = 0;
+			if (p && p.trangThai === 'hoanThanh') {
+				if (isColoringGame) {
+					score = teacherScore !== null ? teacherScore : systemScore;
+				} else {
+					score = systemScore;
+				}
+			}
+			
+			return {
+				studentName: s.studentName,
+				className: s.className,
+				score,
+				teacherScore: isColoringGame ? teacherScore : undefined,
+				timeSpent: p && p.trangThai === 'hoanThanh' ? (p.thoiGianDaDung || 0) : 0
+			};
+		});
 
+		const submittedCount = results.filter(r => r.timeSpent > 0).length;
 		const summary = {
 			totalStudents: allStudents.length,
-			submittedCount: submittedStudents.length,
-			notSubmittedCount: allStudents.length - submittedStudents.length,
-			averageScore: submittedStudents.length > 0
-				? Math.round(submittedStudents.reduce((sum, s) => sum + (s.score || 0), 0) / submittedStudents.length)
+			submittedCount: submittedCount,
+			notSubmittedCount: allStudents.length - submittedCount,
+			averageScore: allStudents.length > 0
+				? Math.round(results.reduce((sum, s) => sum + (s.score || 0), 0) / allStudents.length)
 				: 0
 		};
 
@@ -1251,7 +1264,7 @@ const exportGameResultsReport = async (req, res, next) => {
 				category: game.danhMuc || game.category || ''
 			},
 			summary,
-			results: submittedStudents,
+			results,
 			outputDir
 		});
 
@@ -1330,25 +1343,38 @@ const sendGameResultsReportEmail = async (req, res, next) => {
 			submittedProgress.map(p => [p.treEm._id.toString(), p])
 		);
 
-		const submittedStudents = allStudents
-			.filter(s => submittedMap.has(s.studentId.toString()))
-			.map(s => {
-				const p = submittedMap.get(s.studentId.toString());
-				return {
-					studentName: s.studentName,
-					className: s.className,
-					score: p.diemSo || 0,
-					teacherScore: typeof p.diemGiaoVien === 'number' ? p.diemGiaoVien : null,
-					timeSpent: p.thoiGianDaDung || 0
-				};
-			});
+		const isColoringGame = game.loai === 'toMau';
+		
+		const results = allStudents.map(s => {
+			const p = submittedMap.get(s.studentId.toString());
+			const teacherScore = p && typeof p.diemGiaoVien === 'number' ? p.diemGiaoVien : null;
+			const systemScore = p && p.trangThai === 'hoanThanh' ? (p.diemSo || 0) : 0;
+			
+			let score = 0;
+			if (p && p.trangThai === 'hoanThanh') {
+				if (isColoringGame) {
+					score = teacherScore !== null ? teacherScore : systemScore;
+				} else {
+					score = systemScore;
+				}
+			}
+			
+			return {
+				studentName: s.studentName,
+				className: s.className,
+				score,
+				teacherScore: isColoringGame ? teacherScore : undefined,
+				timeSpent: p && p.trangThai === 'hoanThanh' ? (p.thoiGianDaDung || 0) : 0
+			};
+		});
 
+		const submittedCount = results.filter(r => r.timeSpent > 0).length;
 		const summary = {
 			totalStudents: allStudents.length,
-			submittedCount: submittedStudents.length,
-			notSubmittedCount: allStudents.length - submittedStudents.length,
-			averageScore: submittedStudents.length > 0
-				? Math.round(submittedStudents.reduce((sum, s) => sum + (s.score || 0), 0) / submittedStudents.length)
+			submittedCount: submittedCount,
+			notSubmittedCount: allStudents.length - submittedCount,
+			averageScore: allStudents.length > 0
+				? Math.round(results.reduce((sum, s) => sum + (s.score || 0), 0) / allStudents.length)
 				: 0
 		};
 
@@ -1361,7 +1387,7 @@ const sendGameResultsReportEmail = async (req, res, next) => {
 				category: game.danhMuc || game.category || ''
 			},
 			summary,
-			results: submittedStudents,
+			results,
 			outputDir
 		});
 

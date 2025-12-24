@@ -70,11 +70,10 @@ const generateItemResultReportPdf = async ({ item, summary, results, outputDir }
 		doc.moveDown(0.5);
 
 		const headers = ['STT', 'Họ và tên', 'Lớp', 'Điểm', 'Thời gian'];
-		const colWidths = [40, 200, 120, 80, 80];
+		const colWidths = [40, 180, 120, 120, 80];
 		const startX = doc.x;
 		let y = doc.y;
 
-		// Header styling
 		if (mainFont) {
 			try { doc.font('DejaVu-Bold'); } catch { doc.font(mainFont); }
 		}
@@ -87,7 +86,6 @@ const generateItemResultReportPdf = async ({ item, summary, results, outputDir }
 		});
 
 		y += 18;
-		// draw header separator
 		doc.moveTo(startX, y - 4).lineTo(startX + colWidths.reduce((a, b) => a + b, 0), y - 4).stroke();
 
 		const formatTime = (seconds = 0) => {
@@ -96,7 +94,6 @@ const generateItemResultReportPdf = async ({ item, summary, results, outputDir }
 			return `${m}p${String(s).padStart(2, '0')}s`;
 		};
 
-		// Rows (alternating background)
 		results.forEach((r, idx) => {
 			if (y > doc.page.height - 100) {
 				doc.addPage();
@@ -111,13 +108,20 @@ const generateItemResultReportPdf = async ({ item, summary, results, outputDir }
 				doc.rect(startX, rowY, colWidths.reduce((a, b) => a + b, 0), rowHeight).fill('#f7f7f7');
 				doc.restore();
 			}
-				let displayScore;
-				if (Object.prototype.hasOwnProperty.call(r, 'teacherScore')) {
-					displayScore = r.teacherScore === null ? '' : String(r.teacherScore);
+			let displayScore;
+			const isColoringGame = item.type === 'toMau';
+			if (isColoringGame && Object.prototype.hasOwnProperty.call(r, 'teacherScore')) {
+				if (r.teacherScore === null || r.teacherScore === undefined) {
+					displayScore = 'Chưa chấm điểm';
 				} else {
-					const scoreVal = typeof r.score === 'number' ? r.score : 0;
-					displayScore = String(scoreVal);
+					displayScore = String(r.teacherScore);
 				}
+			} else if (Object.prototype.hasOwnProperty.call(r, 'teacherScore')) {
+				displayScore = r.teacherScore === null ? '' : String(r.teacherScore);
+			} else {
+				const scoreVal = typeof r.score === 'number' ? r.score : 0;
+				displayScore = String(scoreVal);
+			}
 
 				const row = [
 					String(idx + 1),
@@ -135,7 +139,8 @@ const generateItemResultReportPdf = async ({ item, summary, results, outputDir }
 					y,
 					{
 						width: colWidths[i] - 4,
-						align: i === 1 ? 'left' : 'center'
+						align: i === 1 ? 'left' : 'center',
+						ellipsis: false
 					}
 				);
 			});
@@ -213,7 +218,7 @@ const generateStudentReportPdf = async ({ student, activities, outputDir }) => {
 		doc.moveDown(0.5);
 
 		const headers = ['STT', 'Tên hoạt động', 'Loại', 'Điểm', 'Thời gian', 'Ngày hoàn thành'];
-		const colWidths = [30, 220, 60, 50, 70, 100];
+		const colWidths = [30, 120, 60, 130, 70, 120];
 		const startX = doc.x;
 		let y = doc.y;
 
@@ -278,7 +283,7 @@ const generateStudentReportPdf = async ({ student, activities, outputDir }) => {
 				a.type === 'troChoi' ? 'Trò chơi' : 'Bài học',
 				displayScore,
 				formatTime(a.timeSpent || 0),
-				formatDate(a.completedAt)
+				a.completedAt ? formatDate(a.completedAt) : ''
 			];
 
 			if (mainFont) { try { doc.font('DejaVu'); } catch { doc.font(mainFont); } }
@@ -289,7 +294,8 @@ const generateStudentReportPdf = async ({ student, activities, outputDir }) => {
 					y,
 					{
 						width: colWidths[i] - 4,
-						align: i === 1 ? 'left' : 'center'
+						align: i === 1 ? 'left' : 'center',
+						ellipsis: false
 					}
 				);
 			});
